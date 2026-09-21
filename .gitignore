@@ -1,0 +1,27 @@
+# Local runtime state and player data
+logs/
+*.jsonl
+*.rws
+*.failed-*
+laya-control.json
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Build outputs
+build/
+dist/
+*.spec
+Laya-Control-Center.exe
+vendor/RIMAPI/Source/**/bin/
+vendor/RIMAPI/Source/**/obj/
+
+# IDE / OS
+.vs/
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

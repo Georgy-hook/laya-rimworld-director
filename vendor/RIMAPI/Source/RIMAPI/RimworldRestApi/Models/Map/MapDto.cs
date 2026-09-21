@@ -1,0 +1,276 @@
+using System.Collections.Generic;
+
+namespace RIMAPI.Models
+{
+    public class MapDto
+    {
+        public int Id { get; set; }
+        public int Index { get; set; }
+        public int Seed { get; set; }
+        public int TileId { get; set; }
+        public string FactionId { get; set; }
+        public bool IsPlayerHome { get; set; }
+        public bool IsPocketMap { get; set; }
+        public bool IsTempIncidentMap { get; set; }
+        public string Size { get; set; }
+    }
+
+    public class MapWeatherDto
+    {
+        public string Weather { get; set; }
+        public float Temperature { get; set; }
+        public bool GrowthSeasonNow { get; set; }
+        public int DayOfYear { get; set; }
+        public string Quadrum { get; set; }
+        public string CurrentTwelfth { get; set; }
+        public List<float> NextTwelfthAverageTemperatures { get; set; } = new List<float>();
+    }
+
+    public class MapPowerInfoDto
+    {
+        public int CurrentPower { get; set; }
+        public int TotalPossiblePower { get; set; }
+        public int CurrentlyStoredPower { get; set; }
+        public int TotalPowerStorage { get; set; }
+        public int TotalConsumption { get; set; }
+        public int ConsumptionPowerOn { get; set; }
+        public List<int> ProducePowerBuildings = new List<int>();
+        public List<int> ConsumePowerBuildings = new List<int>();
+        public List<int> StorePowerBuildings = new List<int>();
+    }
+
+    public class MapTimeDto
+    {
+        public string Datetime { get; set; }
+    }
+
+    public class AnimalDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; }
+        public string Def { get; set; }
+        public string Faction { get; set; }
+        public bool IsColonyAnimal { get; set; }
+        public float Health { get; set; }
+        public float Hunger { get; set; }
+        public float BleedingRate { get; set; }
+        public bool TendableNow { get; set; }
+        public bool Downed { get; set; }
+        public bool Dead { get; set; }
+        public string CurrentJob { get; set; }
+        public PositionDto Position { get; set; }
+        public int? Trainer { get; set; }
+        public bool Pregnant { get; set; }
+        public string Gender { get; set; }
+        public float Wildness { get; set; }
+        public int MinimumHandlingSkill { get; set; }
+        public float ManhunterOnTameFailChance { get; set; }
+        public bool Reproductive { get; set; }
+        public bool CanBeDesignatedForTaming { get; set; }
+        public float MarketValue { get; set; }
+        public int MeatAmount { get; set; }
+        public int LeatherAmount { get; set; }
+        public float CombatPower { get; set; }
+        public bool Predator { get; set; }
+        public float HarmRevengeChance { get; set; }
+        public float MinComfortableTemperature { get; set; }
+        public float MaxComfortableTemperature { get; set; }
+    }
+
+    public class TameAnimalRequestDto
+    {
+        public int MapId { get; set; }
+        public int AnimalId { get; set; }
+    }
+
+    public class HuntAnimalRequestDto
+    {
+        public int MapId { get; set; }
+        public int AnimalId { get; set; }
+    }
+
+    public class HumanReproductionRequestDto
+    {
+        public int MapId { get; set; }
+        public int FirstPawnId { get; set; }
+        public int SecondPawnId { get; set; }
+        public string Approach { get; set; }
+    }
+
+    public class MapCreaturesSummaryDto
+    {
+        public int ColonistsCount { get; set; }
+        public int PrisonersCount { get; set; }
+        public int EnemiesCount { get; set; }
+        public int AnimalsCount { get; set; }
+        public int InsectoidsCount { get; set; }
+        public int MechanoidsCount { get; set; }
+    }
+
+    public class MapFarmSummaryDto
+    {
+        public int TotalGrowingZones { get; set; }
+        public int TotalPlants { get; set; }
+        public int TotalExpectedYield { get; set; }
+        public int TotalInfectedPlants { get; set; }
+        public float GrowthProgressAverage { get; set; }
+        public List<CropTypeDto> CropTypes { get; set; } = new List<CropTypeDto>();
+    }
+
+    public class CropTypeDto
+    {
+        public string PlantDefName { get; set; }
+        public string PlantLabel { get; set; }
+        public string PlantCategory { get; set; }
+        public int TotalPlants { get; set; }
+        public int HarvestablePlants { get; set; }
+        public int ExpectedYield { get; set; }
+        public int InfectedCount { get; set; }
+        public float GrowthProgressAverage { get; set; }
+        public float DaysUntilHarvest { get; set; }
+        public bool IsFullyGrown { get; set; }
+        public bool IsHarvestable { get; set; }
+        public int ZoneId { get; set; }
+    }
+
+    public class GrowingZoneDto
+    {
+        public ZoneDto Zone { get; set; }
+        public string PlantDefName { get; set; }
+        public int PlantCount { get; set; }
+        public int DefExpectedYield { get; set; }
+        public int ExpectedYield { get; set; }
+        public int InfectedCount { get; set; }
+        public float GrowthProgress { get; set; }
+        public bool IsSowing { get; set; }
+        public string SoilType { get; set; }
+        public float Fertility { get; set; }
+        public bool HasDying { get; set; }
+        public bool HasDyingFromPollution { get; set; }
+        public bool HasDyingFromNoPollution { get; set; }
+    }
+
+    public class MapZonesDto
+    {
+        public List<ZoneDto> Zones { get; set; }
+        public List<ZoneDto> Areas { get; set; }
+    }
+
+    public class ZoneDto
+    {
+        public int Id { get; set; }
+        public int CellsCount { get; set; }
+        public string Label { get; set; }
+        public string BaseLabel { get; set; }
+        public string Type { get; set; }
+        public bool? AllowSow { get; set; }
+        public string PlantDefName { get; set; }
+    }
+
+    public class RoomDto
+    {
+        public int Id { get; set; }
+        public string RoleLabel { get; set; }
+        public float Temperature { get; set; }
+        public int CellsCount { get; set; }
+        public bool TouchesMapEdge { get; set; }
+        public bool IsPrisonCell { get; set; }
+        public bool IsDoorway { get; set; }
+        public int OpenRoofCount { get; set; }
+        public List<int> ContainedBedsIds { get; set; }
+        public float Cleanliness { get; set; }
+        public float Impressiveness { get; set; }
+        public PositionDto Min { get; set; }
+        public PositionDto Max { get; set; }
+        public List<PositionDto> Cells { get; set; }
+        public List<string> ContainedThingDefs { get; set; }
+    }
+
+    public class MapRoomsDto
+    {
+        public List<RoomDto> Rooms { get; set; }
+    }
+
+    public class DestroyRectRequestDto
+    {
+        public int MapId { get; set; }
+        public PositionDto PointA { get; set; }
+        public PositionDto PointB { get; set; }
+    }
+
+    public class RepairPositionsRequestDto
+    {
+        public int MapId { get; set; }
+        public List<PositionDto> Positions { get; set; }
+    }
+
+    public class RepairRectRequestDto
+    {
+        public int MapId { get; set; }
+        public PositionDto PointA { get; set; }
+        public PositionDto PointB { get; set; }
+    }
+
+    public class CreateGrowingZoneRequestDto
+    {
+        public int MapId { get; set; }
+        public string PlantDef { get; set; }
+        public PositionDto PointA { get; set; }
+        public PositionDto PointB { get; set; }
+    }
+
+    public class SetGrowingSowingRequestDto
+    {
+        public int MapId { get; set; }
+        public int ZoneId { get; set; }
+        public bool AllowSow { get; set; }
+    }
+
+    public class FogGridDto
+    {
+        public int MapId { get; set; }
+        public int Width { get; set; }
+        public int Height { get; set; }
+        public string FogData { get; set; }
+    }
+
+    public class CreateStockpileRequestDto
+    {
+        public int MapId { get; set; }
+        public PositionDto PointA { get; set; }
+        public PositionDto PointB { get; set; }
+        public string Name { get; set; }
+        public int? Priority { get; set; }
+        public List<string> AllowedItemDefs { get; set; }
+        public List<string> AllowedItemCategories { get; set; }
+        public float? MinHitPointsPercent { get; set; }
+        public float? MaxHitPointsPercent { get; set; }
+        public string MinQuality { get; set; }
+        public string MaxQuality { get; set; }
+    }
+
+    public class StockpileResponseDto
+    {
+        public int ZoneId { get; set; }
+        public string Name { get; set; }
+        public int CellsCount { get; set; }
+        public int Priority { get; set; }
+        public bool Success { get; set; }
+        public string Message { get; set; }
+    }
+
+    public class UpdateStockpileRequestDto
+    {
+        public int ZoneId { get; set; }
+        public string Name { get; set; }
+        public int? Priority { get; set; }
+        public List<string> AddItemDefs { get; set; }
+        public List<string> RemoveItemDefs { get; set; }
+        public List<string> AddItemCategories { get; set; }
+        public List<string> RemoveItemCategories { get; set; }
+        public float? MinHitPointsPercent { get; set; }
+        public float? MaxHitPointsPercent { get; set; }
+        public string MinQuality { get; set; }
+        public string MaxQuality { get; set; }
+    }
+}

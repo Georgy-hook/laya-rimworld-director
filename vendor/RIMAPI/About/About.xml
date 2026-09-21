@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <name>RIMAPI — Laya Director fork</name>
+  <description>RIMAPI 1.10.0 with normal-gameplay endpoints required by Laya RimWorld Director 0.0.1. This modified GPL-3.0 build is maintained by the Laya RimWorld Director project and is not an official upstream release.</description>
+  <packageId>RedEyeDev.RIMAPI</packageId>
+  <author>RedEyeDev / Laya RimWorld Director contributors</author>
+  <modVersion>1.10.0-laya.0.0.1</modVersion>
+  <url>https://ilyachichkov.github.io/RIMAPI/index.html</url>
+
+  <supportedVersions>
+    <li>1.5</li>
+    <li>1.6</li>
+  </supportedVersions>
+
+  <modDependencies>
+		<li>
+			<packageId>brrainz.harmony</packageId>
+			<displayName>Harmony</displayName>
+			<downloadUrl>https://github.com/pardeike/HarmonyRimWorld/releases/latest</downloadUrl>
+			<steamWorkshopUrl>https://steamcommunity.com/workshop/filedetails/?id=2009463077</steamWorkshopUrl>
+		</li>
+	</modDependencies>
+
+	<loadAfter>
+		<li>brrainz.harmony</li>
+		<li>Ludeon.RimWorld</li>
+	</loadAfter>
+
+</ModMetaData>

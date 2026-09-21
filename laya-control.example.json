@@ -1,0 +1,7 @@
+{
+  "python_exe": ".venv\\Scripts\\python.exe",
+  "director_script": "colony_director.py",
+  "api_url": "http://localhost:8765",
+  "device": "cuda",
+  "interval": 10
+}
