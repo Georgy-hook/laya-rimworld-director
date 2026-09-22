@@ -16,6 +16,10 @@ Highlights:
 - optional compact in-game HUD with thin, true-scale yellow probability bars, heavier labels above the fills, and an immediate hide switch in Settings;
 - assisted animal feeding is offered only to downed or resting patients; a stale impossible feed order is skipped instead of trapping the director in an error loop;
 - every rejected colony or event action enters a persisted 30-300 second bounded backoff and is removed from Laya's choices during that period so another valid response can be selected; unexpected combat and system cycle errors use the same bounded retry policy instead of hammering RIMAPI every two seconds;
+- active combat orders are no longer replaced merely because pawns are walking or enemies crossed a five-cell boundary; Laya re-plans only for staging/attack transitions, target changes, drafting changes, casualties or material health loss;
+- patient feeding now leaves enough time for the feeder to reserve food, walk and complete ingestion instead of reissuing the same order every few seconds;
+- verbose mod descriptions and definition catalogs are summarized into a bounded model context, preserving hunger, patients, threats, skills and doctrine without exceeding Laya's tokenizer limit;
+- doctrine application no longer fails when an income-strategy variable shadows the strategy module;
 - Windows heartbeat publication tolerates transient GUI/antivirus file locks and can no longer terminate the director merely because the status file was being read;
 - loading an older save discards future-timeline order markers, and zero-food/critical-hunger colonies immediately offer reachable wild-food harvests, safe hunts and the matching work priorities instead of idling behind stale issued-work flags;
 - once food becomes available, a downed starving colonist receives a normal patient-feeding job while mobile colonists remain free to eat by themselves;
@@ -47,7 +51,7 @@ Highlights:
 - additive workbench upgrade chains that retain the old bench until its researched replacement is constructed;
 - a live building-definition catalog so DLC/mod construction is discoverable without hard-coding every Def;
 - stockpile priorities now preserve RimWorld's complete 0–5 range, so Critical food/corpse zones work as intended;
-- 69 deterministic Python tests, two GUI smoke tests and a zero-warning C# build.
+- 82 deterministic Python tests, two GUI smoke tests and a zero-warning C# build.
 
 The branch remains experimental. Use copied saves and review the GUI/overlay decision history.
 

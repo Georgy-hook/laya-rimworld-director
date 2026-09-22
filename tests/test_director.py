@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import pathlib
 import sys
 import tempfile
@@ -130,6 +131,89 @@ class DirectorTests(unittest.TestCase):
         self.assertTrue(director.colonist_needs_assisted_feeding({"hunger": 0.0, "downed": True}))
         self.assertFalse(director.colonist_needs_assisted_feeding({"hunger": 0.8, "downed": True}))
 
+    def test_successful_patient_feed_has_a_real_completion_cooldown(self):
+        state = {"issued": {"animal_feed:7": 1000, "colonist_feed:8": 1000}}
+        self.assertTrue(director.issued_recently(
+            state, "animal_feed:7", 1000 + director.PATIENT_FEED_RETRY_TICKS - 1,
+            retry_ticks=director.PATIENT_FEED_RETRY_TICKS,
+        ))
+        self.assertTrue(director.issued_recently(
+            state, "colonist_feed:8", 1000 + director.PATIENT_FEED_RETRY_TICKS - 1,
+            retry_ticks=director.PATIENT_FEED_RETRY_TICKS,
+        ))
+
+    def test_model_state_discards_verbose_mod_metadata_and_stays_bounded(self):
+        skills = {
+            f"Skill{index}": {"level": index, "passion": index % 3, "disabled": False}
+            for index in range(20)
+        }
+        colonists = [{
+            "id": index, "name": f"Colonist {index}", "health": 1.0, "hunger": 0.5,
+            "rest": 0.6, "mood": 0.7, "downed": False, "current_job": "Work",
+            "traits": [{"label": f"Trait {item}"} for item in range(8)],
+            "capacities": {"moving": 1.0, "manipulation": 1.0, "sight": 1.0},
+            "health_conditions": [{"label": f"Condition {item}", "part": "arm"} for item in range(10)],
+            "skills": skills,
+        } for index in range(16)]
+        directions = {
+            f"direction_{index}": {
+                "label": "direction " + ("x" * 200), "fit_score": 100 - index,
+                "people": [{"pawn": "A", "skill": "Crafting", "level": 10, "flame": "++"}],
+                "work_types": ["Crafting"] * 20, "building_programs": ["factory"] * 20,
+            }
+            for index in range(30)
+        }
+        snapshot = {
+            "game": {"date": "5500", "wealth": 1000},
+            "map": {"resources": {"food": 20}, "enemies": 0},
+            "colonists": colonists,
+            "animals": [{"hunger": 0.0}],
+            "development": {
+                "building_counts": {f"Building{index}": index for index in range(200)},
+                "zones": [{"label": f"Zone {index}"} for index in range(100)],
+                "current_research": {"name": "Electricity"},
+                "finished_research": [f"Research{index}" for index in range(200)],
+                "corpses": [], "item_counts": {}, "rooms": [],
+                "active_mods": [{
+                    "name": f"Mod {index}", "package_id": f"mod.{index}",
+                    "description": "verbose metadata " * 1000,
+                } for index in range(40)],
+                "profession_context": {
+                    "directions": directions,
+                    "work_types": [{
+                        "def_name": f"Work{index}", "label": "work " + ("y" * 200),
+                        "relevant_skills": ["Crafting"],
+                    } for index in range(100)],
+                },
+                "building_catalog_summary": {
+                    "total_player_buildings": 500, "available_now": 300,
+                    "categories": {f"Category{index}": index for index in range(50)},
+                    "worktables": [f"Bench{index}" for index in range(100)],
+                    "programs": {f"Program{index}": {"label": "program"} for index in range(50)},
+                },
+                "user_preferences": {},
+            },
+        }
+        encoded = json.dumps(director.build_decision_state(snapshot), ensure_ascii=False, separators=(",", ":"))
+        self.assertLessEqual(len(encoded), 12000)
+        self.assertNotIn("verbose metadata", encoded)
+        self.assertEqual(json.loads(encoded)["colony_animals"]["hungry"], 1)
+
+    def test_doctrine_execution_uses_strategy_module_without_name_shadowing(self):
+        map_state = {"anchor": {"x": 10, "z": 10}, "issued": {}}
+        result = director.execute_action(
+            None,
+            {"map": {"id": 1}, "game": {"tick": 50}},
+            map_state,
+            "choose_colony_doctrine",
+            {
+                "doctrine_selection": {"economy_product": "art"},
+                "doctrine_direction_audit": {"coverage": {}, "expansions": {}, "available": {}, "unavailable": {}},
+            },
+        )
+        self.assertTrue(result["applied"])
+        self.assertEqual(map_state["income_strategy"], "art")
+
     def test_failed_action_uses_bounded_exponential_backoff(self):
         state = {}
         first = director.register_action_failure(state, "build_freezer", "missing component", now=100.0)
@@ -166,6 +250,26 @@ class DirectorTests(unittest.TestCase):
         self.assertEqual((delay, count), (300.0, 6))
         delay, count = director.cycle_retry_policy("waiting", 5, 10.0)
         self.assertEqual((delay, count), (10.0, 0))
+
+    def test_combat_signature_does_not_reissue_order_while_pawns_walk(self):
+        snapshot = {"combat": {
+            "colonists": [{
+                "id": 1, "health": 1.0, "is_dead": False, "is_downed": False,
+                "is_drafted": True, "weapon_def": "Gun_Revolver", "current_job": "Goto",
+                "position": {"x": 10, "z": 10}, "distance_to_nearest_opponent": 20,
+            }],
+            "hostiles": [{
+                "id": 9, "health": 1.0, "is_dead": False, "is_downed": False,
+                "current_job": "AttackStatic", "position": {"x": 60, "z": 60},
+            }],
+        }}
+        first = director.combat_order_signature(snapshot)
+        snapshot["combat"]["colonists"][0]["position"] = {"x": 35, "z": 32}
+        snapshot["combat"]["colonists"][0]["current_job"] = "Wait_Combat"
+        snapshot["combat"]["hostiles"][0]["position"] = {"x": 49, "z": 47}
+        self.assertEqual(first, director.combat_order_signature(snapshot))
+        snapshot["combat"]["hostiles"][0]["health"] = 0.79
+        self.assertNotEqual(first, director.combat_order_signature(snapshot))
 
     def test_locked_heartbeat_replace_falls_back_without_crashing(self):
         with tempfile.TemporaryDirectory() as folder:

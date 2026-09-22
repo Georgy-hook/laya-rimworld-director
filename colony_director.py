@@ -33,6 +33,8 @@ RESEARCH_ROUTE = [
     "ShipSensorCluster",
 ]
 
+PATIENT_FEED_RETRY_TICKS = 12000
+
 ACTION_DESCRIPTIONS = {
     "plan_architecture": "Choose a needed building program first, then let Laya select one procedurally generated, resource- and technology-aware layout. Housing alone provides 24 varied designs without storing 24 rigid blueprints.",
     "improve_room_lighting": "Add a real light source to one dark high-value room selected by Laya; work rooms and hospital treatment should not operate in darkness.",
@@ -1110,7 +1112,7 @@ def action_label(name: str, snapshot: dict[str, Any]) -> str:
 
 
 def next_research(client: bridge.RimApiClient, finished: set[str], map_state: dict[str, Any] | None = None) -> str | None:
-    strategy = str((map_state or {}).get("income_strategy") or "")
+    income_strategy = str((map_state or {}).get("income_strategy") or "")
     doctrine = (map_state or {}).get("doctrine") or {}
     strategy_route = {
         "drugs": ["DrugProduction"],
@@ -1123,7 +1125,7 @@ def next_research(client: bridge.RimApiClient, finished: set[str], map_state: di
         "brewing": ["Brewing"],
         "travel_food": ["Pemmican", "PackagedSurvivalMeal"],
         "orbital": ["MicroelectronicsBasics"],
-    }.get(strategy, [])
+    }.get(income_strategy, [])
     military_route = {
         "weapons": ["Smithing", "Machining", "Gunsmithing", "BlowbackOperation", "GasOperation"],
         "armor": ["Smithing", "PlateArmor", "Machining", "FlakArmor"],
@@ -1172,7 +1174,10 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
     if int(resources.get("food") or 0) > 0 and hungry_colonist_patients:
         patient = hungry_colonist_patients[0]
         patient_id = int(patient["id"])
-        if not issued_recently(map_state, f"colonist_feed:{patient_id}", tick, retry_ticks=1200):
+        if not issued_recently(
+            map_state, f"colonist_feed:{patient_id}", tick,
+            retry_ticks=PATIENT_FEED_RETRY_TICKS,
+        ):
             details["hungry_colonist_id"] = patient_id
             details["hungry_colonist_name"] = str(patient.get("name") or patient_id)
             return ["feed_hungry_colonist"], details
@@ -1331,7 +1336,10 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
             animal for animal in colony_animals
             if animal_needs_tending(animal)
         ),
-        key=lambda animal: (float(animal.get("health") or 1.0), -float(animal.get("bleeding_rate") or 0.0)),
+        key=lambda animal: (
+            bridge.first_number(animal.get("health"), 1.0),
+            -bridge.first_number(animal.get("bleeding_rate"), 0.0),
+        ),
     )
     hungry_animals = sorted(
         (animal for animal in colony_animals if animal_needs_assisted_feeding(animal)),
@@ -1350,7 +1358,13 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
         hungry = hungry_animals[0]
         details["hungry_animal_id"] = int(hungry["id"])
         details["hungry_animal_name"] = str(hungry["name"])
-        if not issued_recently(map_state, f"animal_feed:{hungry['id']}", tick, retry_ticks=1200):
+        # A successful patient-feed order needs time to reserve food, walk to the
+        # bed and complete ingestion. Reissuing it every few seconds interrupts
+        # normal work and creates an apparent decision loop.
+        if not issued_recently(
+            map_state, f"animal_feed:{hungry['id']}", tick,
+            retry_ticks=PATIENT_FEED_RETRY_TICKS,
+        ):
             animal_emergency.insert(0, "feed_hungry_animal")
     if animal_emergency:
         return animal_emergency, details
@@ -1537,7 +1551,7 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
                 "conditions": [condition.get("label") or condition.get("def_name") for condition in pawn.get("health_conditions", [])],
             }
             for pawn in snapshot.get("colonists", [])
-            if pawn.get("downed") or float(pawn.get("health") or 1.0) < 0.9 or pawn.get("health_conditions")
+            if pawn.get("downed") or bridge.first_number(pawn.get("health"), 1.0) < 0.9 or pawn.get("health_conditions")
         ],
         "variant_seed": int(snapshot.get("map", {}).get("id") or 0) * 1000003 + tick // 60000,
         "altar_defs": [str(row.get("def_name")) for row in (dev.get("ideology") or {}).get("ritual_buildings", []) if row.get("def_name")],
@@ -2015,7 +2029,10 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
             one_time.append(f"raid_to:{int(destination['settlement_id'])}")
     maintenance: list[str] = []
     meals = int(resources.get("meals") or 0)
-    medical_emergency = any(c.get("downed") or float(c.get("health") or 1.0) < 0.65 for c in snapshot["colonists"])
+    medical_emergency = any(
+        c.get("downed") or bridge.first_number(c.get("health"), 1.0) < 0.65
+        for c in snapshot["colonists"]
+    )
     if medical_emergency:
         if not issued_recently(map_state, "priority:BasicWorker", tick, retry_ticks=30000):
             maintenance.append("prioritize_rescue")
@@ -2098,49 +2115,215 @@ def build_decision_state(snapshot: dict[str, Any]) -> dict[str, Any]:
                 "learning_percent": professions.passion_info(skill.get("passion"))["xp_percent"],
             }
     people = []
-    for c in snapshot.get("colonists", [])[:12]:
+    colonists = snapshot.get("colonists", [])
+    for c in colonists[:10]:
+        skill_rows = sorted(
+            (c.get("skills") or {}).items(),
+            key=lambda item: (
+                bool((item[1] or {}).get("passion")),
+                int((item[1] or {}).get("level") or 0),
+                not bool((item[1] or {}).get("disabled")),
+            ),
+            reverse=True,
+        )[:8]
         people.append({
             "id": c.get("id"), "name": c.get("name"), "health": c.get("health"), "food": c.get("hunger"),
             "rest": c.get("rest"), "mood": c.get("mood"), "downed": c.get("downed"), "job": c.get("current_job"),
-            "traits": [t.get("label") or t.get("name") for t in c.get("traits", [])],
-            "capacities": c.get("capacities", {}), "pain": c.get("pain", 0),
-            "conditions": [f"{h.get('label') or h.get('def_name')}:{h.get('part')}" for h in c.get("health_conditions", [])],
+            "traits": [t.get("label") or t.get("name") for t in c.get("traits", [])[:5]],
+            "capacities": {
+                name: (c.get("capacities") or {}).get(name)
+                for name in ("consciousness", "moving", "manipulation", "sight", "talking")
+                if name in (c.get("capacities") or {})
+            },
+            "pain": c.get("pain", 0),
+            "conditions": [
+                f"{h.get('label') or h.get('def_name')}:{h.get('part')}"
+                for h in c.get("health_conditions", [])[:6]
+            ],
             "skills": {
                 name: {
                     "level": int(row.get("level") or 0),
                     "flame": professions.passion_info(row.get("passion"))["icon"],
-                    "learning_percent": professions.passion_info(row.get("passion"))["xp_percent"],
                     "disabled": bool(row.get("disabled")),
                 }
-                for name, row in (c.get("skills") or {}).items()
+                for name, row in skill_rows
             },
         })
     dev = snapshot.get("development", {})
-    return {
+    profession_directions = (dev.get("profession_context") or {}).get("directions", {})
+    compact_directions = {
+        name: {
+            "label": row.get("label"),
+            "fit": row.get("fit_score"),
+            "best_people": [
+                {
+                    "pawn": person.get("pawn"), "skill": person.get("skill"),
+                    "level": person.get("level"), "flame": person.get("flame"),
+                }
+                for person in (row.get("people") or [])[:2]
+            ],
+            "work": list(row.get("work_types") or [])[:5],
+            "buildings": list(row.get("building_programs") or [])[:4],
+        }
+        for name, row in sorted(
+            profession_directions.items(),
+            key=lambda item: float((item[1] or {}).get("fit_score") or 0.0),
+            reverse=True,
+        )[:12]
+    }
+    work_types = []
+    for row in (dev.get("profession_context") or {}).get("work_types", [])[:48]:
+        if isinstance(row, dict):
+            work_types.append({
+                "name": row.get("def_name") or row.get("name"),
+                "label": row.get("label"),
+                "skills": list(row.get("relevant_skills") or [])[:3],
+            })
+        else:
+            work_types.append(str(row))
+    catalog = dev.get("building_catalog_summary") or {}
+    compact_catalog = {
+        "total": catalog.get("total_player_buildings"),
+        "available_now": catalog.get("available_now"),
+        "categories": dict(list((catalog.get("categories") or {}).items())[:20]),
+        "worktables": list(catalog.get("worktables") or [])[:32],
+        "programs": {
+            name: (row or {}).get("label")
+            for name, row in list((catalog.get("programs") or {}).items())[:24]
+        },
+    }
+    active_mods = [
+        {
+            "name": row.get("name"),
+            "package_id": row.get("package_id"),
+            "version": row.get("version"),
+        }
+        for row in dev.get("active_mods", [])[:24]
+        if isinstance(row, dict)
+    ]
+    weather = dev.get("weather") or {}
+    state = {
         "goal": "A self-sufficient colony pursuing its saved doctrine and chosen long-term ending.",
         "player_preferences": laya_preferences.model_context(dev.get("user_preferences") or laya_preferences.load_preferences()),
-        "colony": {"date": snapshot.get("game", {}).get("date"), "wealth": snapshot.get("game", {}).get("wealth"), "population": len(people), "threats": snapshot.get("map", {}).get("enemies")},
+        "colony": {
+            "date": snapshot.get("game", {}).get("date"),
+            "wealth": snapshot.get("game", {}).get("wealth"),
+            "population": len(colonists),
+            "people_omitted": max(0, len(colonists) - len(people)),
+            "threats": snapshot.get("map", {}).get("enemies"),
+        },
         "resources": snapshot.get("map", {}).get("resources", {}),
         "people": people,
         "capabilities": capabilities,
-        "colony_animals": {"count": len(snapshot.get("animals", [])), "hungry": sum(1 for a in snapshot.get("animals", []) if float(a.get("hunger") or 1.0) < 0.3)},
+        "colony_animals": {
+            "count": len(snapshot.get("animals", [])),
+            "hungry": sum(
+                1 for animal in snapshot.get("animals", [])
+                if bridge.first_number(animal.get("hunger"), 1.0) < 0.3
+            ),
+        },
         "development": {
-            "buildings": dev.get("building_counts", {}), "zones": [z.get("label") for z in dev.get("zones", [])],
-            "research": (dev.get("current_research") or {}).get("name"), "finished_research": dev.get("finished_research", []),
+            "buildings": dict(list((dev.get("building_counts") or {}).items())[:80]),
+            "zones": [z.get("label") for z in dev.get("zones", [])[:24]],
+            "research": (dev.get("current_research") or {}).get("name"),
+            "finished_research": list(dev.get("finished_research") or [])[:80],
             "human_corpses": len(corpse_rows(snapshot, "CorpsesHumanlike")), "animal_corpses": len(corpse_rows(snapshot, "CorpsesAnimal")),
             "corpse_context": dev.get("corpse_context"), "organ_context": dev.get("organ_context"),
             "trade_goods_value": dev.get("trade_value", 0), "income_strategy": dev.get("income_strategy"), "doctrine": dev.get("doctrine"),
-            "doctrine_audit": dev.get("doctrine_audit"), "active_mods": dev.get("active_mods", []),
-            "weather": dev.get("weather"), "growing_period": (dev.get("tile_details") or {}).get("growing_period"),
+            "doctrine_audit": dev.get("doctrine_audit"), "active_mods": active_mods,
+            "weather": {
+                name: weather.get(name)
+                for name in (
+                    "weather", "temperature", "growth_season_now", "day_of_year",
+                    "quadrum", "current_twelfth", "next_twelfth_average_temperatures",
+                )
+                if name in weather
+            },
+            "growing_period": (dev.get("tile_details") or {}).get("growing_period"),
             "rooms": [{"id": r.get("id"), "role": r.get("role_label"), "cleanliness": r.get("cleanliness"), "impressiveness": r.get("impressiveness"), "temperature": r.get("temperature"), "average_glow": r.get("average_glow"), "dark_percent": r.get("dark_cells_percent")} for r in dev.get("rooms", []) if not r.get("touches_map_edge")][:20],
             "storage_utilization_percent": (dev.get("storage") or {}).get("utilization_percent", 0),
             "materials": {name: dev.get("item_counts", {}).get(name, 0) for name in ("Silver", "WoodLog", "Steel", "ComponentIndustrial", "MedicineHerbal", "MedicineIndustrial", "Ambrosia")},
-            "profession_direction_fit": (dev.get("profession_context") or {}).get("directions", {}),
-            "all_loaded_work_types": (dev.get("profession_context") or {}).get("work_types", []),
-            "building_catalog": dev.get("building_catalog_summary", {}),
+            "profession_direction_fit": compact_directions,
+            "all_loaded_work_types": work_types,
+            "building_catalog": compact_catalog,
             "royalty": dev.get("royalty", {}),
         },
     }
+    return enforce_model_state_budget(state)
+
+
+def enforce_model_state_budget(state: dict[str, Any], max_characters: int = 12000) -> dict[str, Any]:
+    """Bound Laya input without discarding survival, patients, threats or doctrine.
+
+    Laya truncates the encoded state to its configured inference window, but its
+    tokenizer first sees the whole JSON document.  Large mod descriptions and
+    definition catalogs therefore caused tokenizer warnings and hid useful state
+    behind irrelevant metadata.  The normal builder already summarizes those
+    catalogs; this final guard also protects heavily modded and mature colonies.
+    """
+    def size() -> int:
+        return len(json.dumps(state, ensure_ascii=False, separators=(",", ":"), default=str))
+
+    if size() <= max_characters:
+        return state
+    development = state.get("development") or {}
+    reductions = (
+        ("all_loaded_work_types", lambda value: list(value or [])[:24]),
+        ("profession_direction_fit", lambda value: dict(list((value or {}).items())[:8])),
+        ("rooms", lambda value: list(value or [])[:10]),
+        ("finished_research", lambda value: list(value or [])[:40]),
+        ("active_mods", lambda value: list(value or [])[:12]),
+        ("buildings", lambda value: dict(list((value or {}).items())[:40])),
+    )
+    for key, reducer in reductions:
+        development[key] = reducer(development.get(key))
+        if size() <= max_characters:
+            return state
+    catalog = development.get("building_catalog") or {}
+    development["building_catalog"] = {
+        "total": catalog.get("total"),
+        "available_now": catalog.get("available_now"),
+        "categories": catalog.get("categories", {}),
+        "programs": catalog.get("programs", {}),
+    }
+    if size() <= max_characters:
+        return state
+    for person in state.get("people") or []:
+        person["skills"] = dict(list((person.get("skills") or {}).items())[:4])
+        person["conditions"] = list(person.get("conditions") or [])[:3]
+    if size() <= max_characters:
+        return state
+    state["people"] = list(state.get("people") or [])[:6]
+    development["rooms"] = list(development.get("rooms") or [])[:6]
+    development["profession_direction_fit"] = dict(
+        list((development.get("profession_direction_fit") or {}).items())[:5]
+    )
+    if size() <= max_characters:
+        return state
+    # Personal guidance remains present, but a pasted essay must not evict live
+    # hunger, health and threat data from the model's short inference window.
+    preferences = state.get("player_preferences")
+    if isinstance(preferences, dict):
+        state["player_preferences"] = {
+            key: (value[:500] if isinstance(value, str) else value)
+            for key, value in list(preferences.items())[:20]
+        }
+    if size() <= max_characters:
+        return state
+    # Last-resort shape for extremely modded saves. Candidate generation and
+    # feasibility checks have already consumed the full snapshot, so removing
+    # definition catalogs here cannot make an impossible action executable.
+    state["resources"] = dict(list((state.get("resources") or {}).items())[:24])
+    state["capabilities"] = dict(list((state.get("capabilities") or {}).items())[:12])
+    state["development"] = {
+        key: development.get(key)
+        for key in (
+            "research", "human_corpses", "animal_corpses", "corpse_context",
+            "organ_context", "trade_goods_value", "income_strategy", "doctrine",
+            "weather", "growing_period", "storage_utilization_percent", "materials",
+        )
+    }
+    return state
 
 
 def action_domain(name: str) -> str:
@@ -3328,27 +3511,27 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
         }
         return {"applied": True, "approach": approach, "responses": responses}
     if choice.startswith("income_"):
-        strategy = choice.removeprefix("income_")
+        income_strategy = choice.removeprefix("income_")
         strategy_names = {
             "drugs": "drugs", "tailoring": "tailoring", "art": "art",
             "livestock": "livestock", "biofuel": "biofuel", "mining": "mining",
             "crops": "crops", "brewing": "brewing", "travel_food": "travel_food",
             "orbital": "orbital", "organs": "organs",
         }
-        if strategy not in strategy_names:
-            raise bridge.RimApiError(f"Unknown income strategy: {strategy}")
-        map_state["income_strategy"] = strategy_names[strategy]
+        if income_strategy not in strategy_names:
+            raise bridge.RimApiError(f"Unknown income strategy: {income_strategy}")
+        map_state["income_strategy"] = strategy_names[income_strategy]
         map_state["income_strategy_tick"] = tick
-        issued[f"income:{strategy}"] = tick
-        if strategy == "drugs":
+        issued[f"income:{income_strategy}"] = tick
+        if income_strategy == "drugs":
             response = client.post("/api/v1/map/zone/growing", body={
                 "map_id": map_id,
                 "plant_def": "Plant_Psychoid",
                 "point_a": position(map_state["growing_anchor"]["x"], map_state["growing_anchor"]["z"] + 10),
                 "point_b": position(map_state["growing_anchor"]["x"] + 9, map_state["growing_anchor"]["z"] + 17),
             })
-            return {"applied": True, "strategy": strategy, "response": response}
-        if strategy == "tailoring":
+            return {"applied": True, "strategy": income_strategy, "response": response}
+        if income_strategy == "tailoring":
             grow = client.post("/api/v1/map/zone/growing", body={
                 "map_id": map_id,
                 "plant_def": "Plant_Cotton",
@@ -3356,24 +3539,24 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
                 "point_b": position(map_state["growing_anchor"]["x"] + 18, map_state["growing_anchor"]["z"] + 17),
             })
             bench = post_blueprint(client, map_id, anchor, workshop_blueprint("HandTailoringBench", stuff="WoodLog"), dx=16, dz=12)
-            return {"applied": True, "strategy": strategy, "responses": [grow, bench]}
-        if strategy == "art":
+            return {"applied": True, "strategy": income_strategy, "responses": [grow, bench]}
+        if income_strategy == "art":
             response = post_blueprint(client, map_id, anchor, workshop_blueprint("TableSculpting", stuff="WoodLog"), dx=16, dz=16)
-            return {"applied": True, "strategy": strategy, "response": response}
-        if strategy == "livestock":
-            return {"applied": True, "strategy": strategy, "response": prioritize(client, snapshot, "Handling")}
-        if strategy == "biofuel":
+            return {"applied": True, "strategy": income_strategy, "response": response}
+        if income_strategy == "livestock":
+            return {"applied": True, "strategy": income_strategy, "response": prioritize(client, snapshot, "Handling")}
+        if income_strategy == "biofuel":
             response = select_research_if_available(client, "BiofuelRefining")
-            return {"applied": bool(response.get("applied", True)), "strategy": strategy, "response": response}
-        if strategy == "crops":
+            return {"applied": bool(response.get("applied", True)), "strategy": income_strategy, "response": response}
+        if income_strategy == "crops":
             response = client.post("/api/v1/map/zone/growing", body={
                 "map_id": map_id,
                 "plant_def": "Plant_Corn",
                 "point_a": position(map_state["growing_anchor"]["x"] + 20, map_state["growing_anchor"]["z"]),
                 "point_b": position(map_state["growing_anchor"]["x"] + 29, map_state["growing_anchor"]["z"] + 9),
             })
-            return {"applied": True, "strategy": strategy, "response": response}
-        if strategy == "brewing":
+            return {"applied": True, "strategy": income_strategy, "response": response}
+        if income_strategy == "brewing":
             grow = client.post("/api/v1/map/zone/growing", body={
                 "map_id": map_id,
                 "plant_def": "Plant_Hops",
@@ -3381,19 +3564,19 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
                 "point_b": position(map_state["growing_anchor"]["x"] + 27, map_state["growing_anchor"]["z"] + 18),
             })
             research = select_research_if_available(client, "Brewing")
-            return {"applied": True, "strategy": strategy, "responses": [grow, research]}
-        if strategy == "travel_food":
+            return {"applied": True, "strategy": income_strategy, "responses": [grow, research]}
+        if income_strategy == "travel_food":
             research = select_research_if_available(client, "PackagedSurvivalMeal")
             if not research.get("applied", True):
                 research = select_research_if_available(client, "Pemmican")
-            return {"applied": True, "strategy": strategy, "response": research}
-        if strategy == "orbital":
+            return {"applied": True, "strategy": income_strategy, "response": research}
+        if income_strategy == "orbital":
             research = select_research_if_available(client, "MicroelectronicsBasics")
-            return {"applied": bool(research.get("applied", True)), "strategy": strategy, "response": research}
-        if strategy == "organs":
+            return {"applied": bool(research.get("applied", True)), "strategy": income_strategy, "response": research}
+        if income_strategy == "organs":
             return {
                 "applied": True,
-                "strategy": strategy,
+                "strategy": income_strategy,
                 "note": "Organ harvesting remains per-prisoner and is offered only with doctor skill 8+, medicine, and explicit Laya selection.",
             }
         # Mine the compact local gold vein first. Long-range scanning is added to
@@ -3413,14 +3596,14 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
             })
         else:
             response = select_research_if_available(client, "LongRangeMineralScanner")
-        return {"applied": True, "strategy": strategy, "response": response}
+        return {"applied": True, "strategy": income_strategy, "response": response}
     if choice == "build_income_infrastructure":
-        strategy = str(map_state.get("income_strategy") or "")
-        if strategy == "drugs":
+        income_strategy = str(map_state.get("income_strategy") or "")
+        if income_strategy == "drugs":
             response = post_blueprint(client, map_id, anchor, workshop_blueprint("DrugLab"), dx=21, dz=16)
-        elif strategy == "biofuel":
+        elif income_strategy == "biofuel":
             response = post_blueprint(client, map_id, anchor, workshop_blueprint("BiofuelRefinery"), dx=21, dz=20)
-        elif strategy == "brewing":
+        elif income_strategy == "brewing":
             layout = blueprint([
                 building("Brewery", 0, 0, rotation=2),
                 building("FermentingBarrel", 4, 0),
@@ -3428,14 +3611,14 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
                 building("FermentingBarrel", 6, 0),
             ], 8, 3)
             response = post_blueprint(client, map_id, anchor, layout, dx=21, dz=24)
-        elif strategy == "orbital":
+        elif income_strategy == "orbital":
             response = post_blueprint(client, map_id, anchor, orbital_trade_blueprint(), dx=21, dz=28)
         else:
-            return {"applied": False, "reason": f"No separate infrastructure is required for {strategy}"}
-        issued[f"income_infrastructure:{strategy}"] = tick
-        return {"applied": True, "strategy": strategy, "response": response}
+            return {"applied": False, "reason": f"No separate infrastructure is required for {income_strategy}"}
+        issued[f"income_infrastructure:{income_strategy}"] = tick
+        return {"applied": True, "strategy": income_strategy, "response": response}
     if choice == "configure_income_production":
-        strategy = str(map_state.get("income_strategy") or "")
+        income_strategy = str(map_state.get("income_strategy") or "")
         recipe_by_strategy = {
             "drugs": ("DrugLab", "Make_Flake", 50),
             "tailoring": ("HandTailoringBench", "Make_Duster", 10),
@@ -3444,20 +3627,20 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
             "brewing": ("Brewery", "Make_Wort", 50),
             "travel_food": ("FueledStove", "CookMealSurvivalPack", 30),
         }
-        table_def, recipe, target = recipe_by_strategy[strategy]
+        table_def, recipe, target = recipe_by_strategy[income_strategy]
         table = next(
             (row for row in snapshot["development"]["work_tables"] if str(row.get("thing_def")) == table_def),
             None,
         )
-        if table is None and strategy == "tailoring":
+        if table is None and income_strategy == "tailoring":
             table = next((row for row in snapshot["development"]["work_tables"] if row.get("thing_def") == "ElectricTailoringBench"), None)
-        if table is None and strategy == "travel_food":
+        if table is None and income_strategy == "travel_food":
             table = next((row for row in snapshot["development"]["work_tables"] if row.get("thing_def") == "ElectricStove"), None)
         if table is None:
-            return {"applied": False, "reason": f"No completed workshop for {strategy}"}
+            return {"applied": False, "reason": f"No completed workshop for {income_strategy}"}
         response = ensure_bill(client, table, recipe, target)
-        issued[f"income_bills:{strategy}"] = tick
-        return {"applied": True, "strategy": strategy, "response": response}
+        issued[f"income_bills:{income_strategy}"] = tick
+        return {"applied": True, "strategy": income_strategy, "response": response}
     if choice == "build_killbox":
         response = post_blueprint(client, map_id, anchor, killbox_blueprint(), dx=13, dz=-16)
         issued["killbox"] = tick
@@ -4402,6 +4585,64 @@ def cycle_retry_policy(runtime_state: str, consecutive_errors: int, interval: fl
     return delay, next_count
 
 
+def combat_order_signature(snapshot: dict[str, Any]) -> tuple[Any, ...]:
+    """Return only changes that justify replacing an active combat order.
+
+    Exact positions and pawn jobs change while a drafted pawn walks to cover.
+    Including them made the director re-plan and resend the same order every two
+    seconds, which could keep a pawn from ever completing it. The signature still
+    changes for casualties, material health loss, drafting, target changes and a
+    transition from raid preparation to active attack.
+    """
+    combat = snapshot.get("combat") or {}
+    colonists = list(combat.get("colonists") or [])
+    hostiles = [row for row in (combat.get("hostiles") or []) if not row.get("is_dead")]
+
+    def hostile_intent(row: dict[str, Any]) -> str:
+        job = str(row.get("current_job") or "").lower()
+        for intent, markers in (
+            ("kidnap", ("kidnap", "capture")),
+            ("flee", ("flee", "exitmap")),
+            ("breach", ("breach", "sap")),
+            ("steal", ("steal",)),
+            ("attack", ("attack", "goto", "assault")),
+            ("staging", ("wait", "prepare", "siege", "mortar")),
+        ):
+            if any(marker in job for marker in markers):
+                return intent
+        return "unknown"
+
+    healthy = [
+        row for row in colonists
+        if row.get("id") is not None
+        and not row.get("is_dead")
+        and not row.get("is_downed")
+        and bridge.first_number(row.get("health"), 0.0) >= 0.6
+    ]
+    hostile_intents = tuple(sorted(hostile_intent(row) for row in hostiles))
+    staging = bool(healthy) and bool(hostiles) and all(
+        bridge.first_number(row.get("distance_to_nearest_opponent"), 9999) > 45
+        for row in healthy
+    ) and not any(intent in {"attack", "breach", "kidnap", "steal"} for intent in hostile_intents)
+    fighter_state = tuple(sorted(
+        (
+            int(row["id"]), bool(row.get("is_drafted")), bool(row.get("is_downed")),
+            int(bridge.first_number(row.get("health"), 0.0) * 10),
+            str(row.get("weapon_def") or ""),
+        )
+        for row in colonists if row.get("id") is not None
+    ))
+    hostile_state = tuple(sorted(
+        (
+            int(row["id"]), bool(row.get("is_downed")),
+            int(bridge.first_number(row.get("health"), 0.0) * 10),
+            hostile_intent(row), int(row.get("carrying_pawn_id") or 0),
+        )
+        for row in hostiles if row.get("id") is not None
+    ))
+    return ("staging" if staging else "active", fighter_state, hostile_state)
+
+
 def main() -> int:
     args = parser().parse_args()
     singleton_handle = None
@@ -4460,39 +4701,7 @@ def main() -> int:
                         time.sleep(max(0.0, 2.0 - elapsed))
                         continue
                     next_downed_cycle = 0.0
-                    hostile_ids = tuple(sorted(int(c["id"]) for c in snapshot["combat"]["hostiles"] if c.get("id") is not None))
-                    drafted_ids = tuple(sorted(int(c["id"]) for c in snapshot["combat"]["colonists"] if c.get("is_drafted") and c.get("id") is not None))
-                    eligible_ids = tuple(sorted(
-                        int(c["id"])
-                        for c in snapshot["combat"]["colonists"]
-                        if c.get("id") is not None
-                        and not c.get("is_dead")
-                        and not c.get("is_downed")
-                        and float(c.get("health") or 0.0) >= 0.6
-                    ))
-                    fighter_state = tuple(sorted(
-                        (
-                            int(c["id"]),
-                            bool(c.get("is_drafted")),
-                            int(float(c.get("health") or 0.0) * 10),
-                            str(c.get("weapon_def") or ""),
-                            str(c.get("current_job") or ""),
-                        )
-                        for c in snapshot["combat"]["colonists"]
-                        if c.get("id") is not None
-                    ))
-                    hostile_state = tuple(sorted(
-                        (
-                            int(c["id"]),
-                            int(float(c.get("health") or 0.0) * 10),
-                            str(c.get("current_job") or ""),
-                            int(float((c.get("position") or {}).get("x") or 0) // 5),
-                            int(float((c.get("position") or {}).get("z") or 0) // 5),
-                        )
-                        for c in snapshot["combat"]["hostiles"]
-                        if c.get("id") is not None
-                    ))
-                    signature = (hostile_ids, drafted_ids, eligible_ids, fighter_state, hostile_state)
+                    signature = combat_order_signature(snapshot)
                     if signature == last_combat_signature and last_combat_record is not None:
                         publish_combat_overlay(client, last_combat_record, repeated=True)
                         print(f"[{bridge.utc_now()}] combat order still active; no duplicate command", flush=True)
