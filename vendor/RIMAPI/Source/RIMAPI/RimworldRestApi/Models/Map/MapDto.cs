@@ -180,9 +180,13 @@ namespace RIMAPI.Models
         public List<int> ContainedBedsIds { get; set; }
         public float Cleanliness { get; set; }
         public float Impressiveness { get; set; }
+        public float AverageGlow { get; set; }
+        public int DarkCellsCount { get; set; }
+        public float DarkCellsPercent { get; set; }
         public PositionDto Min { get; set; }
         public PositionDto Max { get; set; }
         public List<PositionDto> Cells { get; set; }
+        public List<PositionDto> LightPlacementCells { get; set; }
         public List<string> ContainedThingDefs { get; set; }
     }
 

@@ -15,8 +15,17 @@ Highlights:
 - Laya-selected combat roster using that pawn context;
 - optional prisoner-organ economy with explicit nonlethal/lethal plans and normal surgery bills;
 - Ideology context plus a ritual-room plan using the colony's actual altar or ideogram;
+- live profession catalog and profession-fit doctrine based on every colonist's skills, work restrictions and passions;
+- passion-aware development plans: no flame 35%, small flame 100%, large flame 150%, plus Fast/Slow Learner and Too Smart context;
+- Night Owl schedules with daytime sleep and flexible nighttime work/recreation;
+- procedural architecture module with 17 functional programs and 24 distinct residential layouts, selected through program → style → variant nesting;
+- room glow telemetry and Laya-selected lighting for dark work, medical and living spaces;
+- hospitals that advance to hospital beds, vitals monitor and clean flooring when unlocked;
+- throne-room planning driven by actual Royalty titles and unmet room requirements;
+- additive workbench upgrade chains that retain the old bench until its researched replacement is constructed;
+- a live building-definition catalog so DLC/mod construction is discoverable without hard-coding every Def;
 - stockpile priorities now preserve RimWorld's complete 0–5 range, so Critical food/corpse zones work as intended;
-- 34 deterministic Python tests and a zero-warning C# build.
+- 44 deterministic Python tests and a zero-warning C# build.
 
 The branch remains experimental. Use copied saves and review the GUI/overlay decision history.
 

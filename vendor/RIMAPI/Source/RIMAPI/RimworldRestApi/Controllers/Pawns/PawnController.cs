@@ -4,6 +4,7 @@ using RIMAPI.Core;
 using RIMAPI.Http;
 using RIMAPI.Models;
 using RIMAPI.Services;
+using RIMAPI.Helpers;
 
 namespace RIMAPI.Controllers
 {
@@ -184,6 +185,13 @@ namespace RIMAPI.Controllers
         {
             var result = _colonistService.GetWorkList();
             await context.SendJsonResponse(result);
+        }
+
+        [Get("/api/v1/work-list/details")]
+        [EndpointMetadata("List all loaded work types, including modded professions and their relevant skills")]
+        public async Task GetDetailedWorkList(HttpListenerContext context)
+        {
+            await context.SendJsonResponse(ApiResult<System.Collections.Generic.List<WorkTypeDefDto>>.Ok(DefDatabaseHelper.GetWorkTypeDefDtoList()));
         }
 
         [Post("/api/v1/colonist/work-priority")]

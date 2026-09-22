@@ -566,9 +566,13 @@ namespace RIMAPI.Helpers
                         OpenRoofCount = s.OpenRoofCount,
                         Cleanliness = s.GetStat(RoomStatDefOf.Cleanliness),
                         Impressiveness = s.GetStat(RoomStatDefOf.Impressiveness),
+                        AverageGlow = RoomAverageGlow(s, map),
+                        DarkCellsCount = RoomDarkCells(s, map),
+                        DarkCellsPercent = RoomDarkCellsPercent(s, map),
                         Min = RoomMin(s),
                         Max = RoomMax(s),
                         Cells = RoomCells(s),
+                        LightPlacementCells = RoomLightPlacementCells(s, map),
                         ContainedThingDefs = s.ContainedAndAdjacentThings
                             .Where(t => t?.def != null).Select(t => t.def.defName).Distinct().ToList(),
                     })
@@ -592,9 +596,13 @@ namespace RIMAPI.Helpers
                         OpenRoofCount = s.OpenRoofCount,
                         Cleanliness = s.GetStat(RoomStatDefOf.Cleanliness),
                         Impressiveness = s.GetStat(RoomStatDefOf.Impressiveness),
+                        AverageGlow = RoomAverageGlow(s, map),
+                        DarkCellsCount = RoomDarkCells(s, map),
+                        DarkCellsPercent = RoomDarkCellsPercent(s, map),
                         Min = RoomMin(s),
                         Max = RoomMax(s),
                         Cells = RoomCells(s),
+                        LightPlacementCells = RoomLightPlacementCells(s, map),
                         ContainedThingDefs = s.ContainedAndAdjacentThings
                             .Where(t => t?.def != null).Select(t => t.def.defName).Distinct().ToList(),
                     })
@@ -602,6 +610,35 @@ namespace RIMAPI.Helpers
             };
 #endif
             return mapRooms;
+        }
+
+        private static float RoomAverageGlow(Room room, Map map)
+        {
+            var cells = room.Cells.ToList();
+            return cells.Count == 0 ? 0f : cells.Average(cell => map.glowGrid.GroundGlowAt(cell, false, false));
+        }
+
+        private static int RoomDarkCells(Room room, Map map)
+        {
+            return room.Cells.Count(cell => map.glowGrid.GroundGlowAt(cell, false, false) < 0.3f);
+        }
+
+        private static float RoomDarkCellsPercent(Room room, Map map)
+        {
+            if (room.CellCount <= 0) return 0f;
+            return 100f * RoomDarkCells(room, map) / room.CellCount;
+        }
+
+        private static List<PositionDto> RoomLightPlacementCells(Room room, Map map)
+        {
+            return room.Cells
+                .Where(cell => cell.Standable(map)
+                    && cell.GetEdifice(map) == null
+                    && !cell.GetThingList(map).Any(thing => thing?.def?.category == ThingCategory.Building))
+                .OrderBy(cell => map.glowGrid.GroundGlowAt(cell, false, false))
+                .Take(8)
+                .Select(cell => new PositionDto { X = cell.x, Y = 0, Z = cell.z })
+                .ToList();
         }
 
         private static PositionDto RoomMin(Room room)

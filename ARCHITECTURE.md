@@ -25,6 +25,21 @@ RIMAPI snapshot
 
 Hunting, taming, wild harvesting, flooring, paths, doctrine, sculpture placement, temples, construction projects, trade and combat rosters therefore have conditional parameter stages. A rejected branch cannot accidentally select or execute one of its targets.
 
+Architecture is a deeper instance of the same rule:
+
+```text
+need + profession doctrine + loaded BuildingDefs
+  → building program
+  → house style (residences only)
+  → 3–4 generated variants
+  → resource/research validation
+  → ordinary blueprint
+```
+
+`colony_architect.py` contains functional programs and generators rather than a long list of saved maps. A deterministic seed produces 24 residential alternatives (six styles by four door/size/furniture arrangements) and bounded variants for other facilities. Existing buildings are never demolished merely because a doctrine or material preference changes.
+
+`colony_professions.py` reads the live `WorkTypeDef` catalog, so Core, DLC and modded jobs remain visible. Strategic directions are scored from each pawn's skill, passion, learning traits, health and work restrictions. Skill training uses the same hierarchy: choose the action first, then the exact pawn/skill/work mapping.
+
 ## Responsibility boundary
 
 Laya decides preferences and trade-offs. Code remains responsible for facts and invariants:
@@ -35,5 +50,8 @@ Laya decides preferences and trade-offs. Code remains responsible for facts and 
 - dangerous/lethal organ plans are explicit, never a side effect of a sale/recruit choice;
 - battle candidates carry weapon, trait, injury, pain and body-capacity context;
 - repeated orders are suppressed, while stalled plans can be retried after a bounded interval.
+- darkness is measured from the real glow grid; a light blueprint uses a verified empty room cell;
+- throne-room choices use the current royal title and unmet requirements, while hospital variants follow unlocked bed/monitor/floor technology;
+- workbench upgrades are additive: the old bench remains until the successor exists.
 
 This is intentionally not a free-form agent that invents API calls. Adding a capability requires a typed candidate, compact context, validation, a normal-game executor and a deterministic test.

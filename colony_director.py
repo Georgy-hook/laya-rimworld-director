@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 import rimworld_laya as bridge
+import colony_architect as architect
+import colony_professions as professions
 
 
 RESEARCH_ROUTE = [
@@ -28,6 +30,11 @@ RESEARCH_ROUTE = [
 ]
 
 ACTION_DESCRIPTIONS = {
+    "plan_architecture": "Choose a needed building program first, then let Laya select one procedurally generated, resource- and technology-aware layout. Housing alone provides 24 varied designs without storing 24 rigid blueprints.",
+    "improve_room_lighting": "Add a real light source to one dark high-value room selected by Laya; work rooms and hospital treatment should not operate in darkness.",
+    "develop_colonist_skill": "Choose a colonist, skill and matching live WorkType using current level, small/large passion flames, learning traits, health and the colony's strategic gaps.",
+    "optimize_night_owl_schedule": "Move one Night Owl colonist's sleep to 11:00-18:59 and leave the night flexible for work and recreation.",
+    "upgrade_workbench": "Build an unlocked successor workbench beside the old one; keep the old bench until the upgrade is completed so production never disappears mid-transition.",
     "unforbid_supplies": "Remove the red forbidden marks from landed supplies so colonists can eat, equip and haul them.",
     "create_food_stockpile": "Create a high-priority food-only stockpile inside the planned freezer.",
     "build_sleeping_spots": "Place free sleeping spots first; these cannot waste scarce construction materials in botched attempts.",
@@ -113,6 +120,11 @@ ACTION_DESCRIPTIONS = {
 }
 
 ACTION_LABELS = {
+    "plan_architecture": "архитектурный проект",
+    "improve_room_lighting": "освещение комнаты",
+    "develop_colonist_skill": "развитие навыка",
+    "optimize_night_owl_schedule": "расписание совы",
+    "upgrade_workbench": "модернизация верстака",
     "unforbid_supplies": "разрешить припасы",
     "create_food_stockpile": "пищевой склад",
     "build_sleeping_spots": "спальные места",
@@ -807,6 +819,9 @@ def collect_development(client: bridge.RimApiClient, snapshot: dict[str, Any]) -
     farm = bridge.safe_get(client, "/api/v1/map/farm/summary", warnings, map_id=map_id) or {}
     projects_raw = bridge.safe_get(client, "/api/v1/builder/projects", warnings, map_id=map_id) or {}
     ideology = bridge.safe_get(client, "/api/v1/colony/ideology", warnings) or {}
+    work_types = bridge.safe_get(client, "/api/v1/work-list/details", warnings) or []
+    building_catalog = bridge.safe_get(client, "/api/v1/buildings/catalog", warnings) or []
+    royalty = bridge.safe_get(client, "/api/v1/colony/royalty", warnings) or {}
     tile_id = snapshot.get("map", {}).get("tile_id")
     tile_details = bridge.safe_get(client, "/api/v1/world/tile/details", warnings, id=int(tile_id)) if tile_id is not None else {}
     zones = zones_raw.get("zones", []) if isinstance(zones_raw, dict) else []
@@ -850,7 +865,14 @@ def collect_development(client: bridge.RimApiClient, snapshot: dict[str, Any]) -
         "tile_details": tile_details or {},
         "construction_projects": projects_raw.get("projects", []) if isinstance(projects_raw, dict) else [],
         "ideology": ideology if isinstance(ideology, dict) else {},
+        "work_types": work_types if isinstance(work_types, list) else [],
+        "building_catalog": building_catalog if isinstance(building_catalog, list) else [],
+        "building_catalog_summary": architect.summarize_catalog(building_catalog if isinstance(building_catalog, list) else []),
+        "royalty": royalty if isinstance(royalty, dict) else {},
     }
+    snapshot["development"]["profession_context"] = professions.profession_context(
+        snapshot.get("colonists", []), snapshot["development"]["work_types"]
+    )
     return snapshot
 
 
@@ -1156,6 +1178,26 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
         and lowest_food >= 0.30
         and not any(c.get("downed") for c in snapshot["colonists"])
     )
+    profession_context = dev.get("profession_context") or professions.profession_context(
+        snapshot.get("colonists", []), dev.get("work_types") or []
+    )
+    dev["profession_context"] = profession_context
+
+    night_owls = professions.night_owl_options(snapshot.get("colonists", []))
+    unscheduled_night_owls = {
+        pawn_id: description for pawn_id, description in night_owls.items()
+        if str(pawn_id) not in {str(value) for value in map_state.get("night_owl_schedules", [])}
+    }
+    if unscheduled_night_owls:
+        details["night_owl_options"] = unscheduled_night_owls
+        dev["night_owl_options"] = unscheduled_night_owls
+        one_time.append("optimize_night_owl_schedule")
+
+    training = professions.training_options(snapshot.get("colonists", []), dev.get("work_types") or [])
+    if survival_stable and training and not issued_recently(map_state, "skill_development", tick, retry_ticks=180000):
+        details["skill_training_options"] = training
+        dev["skill_training_options"] = training
+        one_time.append("develop_colonist_skill")
     if survival_stable and best_builder >= 4 and counts.get("SimpleResearchBench", 0) == 0 and "starter_base" not in map_state["issued"]:
         one_time.append("build_starter_base")
     tables = dev["work_tables"]
@@ -1195,6 +1237,7 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
             "weather": weather,
             "boom_animals_nearby": sum(1 for a in snapshot.get("wild_animals", []) if "boom" in str(a.get("def") or "").lower()),
             "ores": {name: len((group or {}).get("cells") or []) for name, group in (dev.get("ores", {}).get("ores") or {}).items()},
+            "profession_directions": profession_context.get("directions") or {},
         }
         dev["doctrine_context"] = details["doctrine_context"]
         one_time.append("choose_colony_doctrine")
@@ -1216,9 +1259,80 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
             interior = {(x + dx, z + dz) for dx in range(1, 6) for dz in range(1, 6)} | {(x + 3, z)}
             if not (interior & natural) and not plan.get("furnished"):
                 one_time.append("finish_mountain_bedroom")
-        elif doctrine_form in {"separate_houses", "courtyard", "compact"} and chosen_material in material_options:
-            details["bedroom_material"] = chosen_material
-            one_time.append("build_private_bedroom")
+        # Surface settlements are handled by the procedural architecture
+        # planner below. Mountain bedrooms retain their separate mining phase.
+
+    upgrade_options = architect.workbench_upgrade_options(dev)
+    if survival_stable and upgrade_options and not issued_recently(map_state, "workbench_upgrade", tick, retry_ticks=120000):
+        details["workbench_upgrade_options"] = upgrade_options
+        dev["workbench_upgrade_options"] = upgrade_options
+        one_time.append("upgrade_workbench")
+
+    dark_room_options: dict[str, dict[str, Any]] = {}
+    for room in dev.get("rooms", []):
+        if room.get("touches_map_edge") or not room.get("light_placement_cells"):
+            continue
+        role = str(room.get("role_label") or "room")
+        defs = set(map(str, room.get("contained_thing_defs") or []))
+        high_value = any(token in role.lower() for token in ("hospital", "kitchen", "workshop", "laboratory", "dining", "bedroom"))
+        high_value = high_value or bool(defs & {"HospitalBed", "Bed", "FueledStove", "ElectricStove", "SimpleResearchBench", "HiTechResearchBench"})
+        if high_value and float(room.get("dark_cells_percent") or 0.0) >= 40.0:
+            dark_room_options[str(room.get("id"))] = {
+                "room_id": int(room.get("id") or 0),
+                "role": role,
+                "average_glow": round(float(room.get("average_glow") or 0.0), 2),
+                "dark_percent": round(float(room.get("dark_cells_percent") or 0.0), 1),
+                "temperature": round(float(room.get("temperature") or 0.0), 1),
+                "placement_cells": room.get("light_placement_cells") or [],
+            }
+    if survival_stable and dark_room_options and not issued_recently(map_state, "room_lighting", tick, retry_ticks=60000):
+        details["dark_room_options"] = dark_room_options
+        dev["dark_room_options"] = dark_room_options
+        one_time.append("improve_room_lighting")
+
+    architecture_material = chosen_material if chosen_material in material_options else next(iter(material_options), "")
+    architecture_context = {
+        "building_counts": counts,
+        "buildings": dev.get("buildings") or [],
+        "rooms": dev.get("rooms") or [],
+        "colonists": snapshot.get("colonists") or [],
+        "animals": colony_animals,
+        "royalty": dev.get("royalty") or {},
+        "ideology": dev.get("ideology") or {},
+        "storage": dev.get("storage") or {},
+        "professions": profession_context,
+        "doctrine": current_doctrine,
+        "finished_research": list(finished),
+        "building_catalog": dev.get("building_catalog") or [],
+        "item_counts": item_counts,
+        "material": architecture_material,
+        "powered": finished_electricity,
+        "climate": climate_mode,
+        "wealth": snapshot.get("game", {}).get("wealth") or 0,
+        "animal_count": len(colony_animals),
+        "potential_patients": [
+            {
+                "name": pawn.get("name"), "health": pawn.get("health"), "downed": pawn.get("downed"),
+                "conditions": [condition.get("label") or condition.get("def_name") for condition in pawn.get("health_conditions", [])],
+            }
+            for pawn in snapshot.get("colonists", [])
+            if pawn.get("downed") or float(pawn.get("health") or 1.0) < 0.9 or pawn.get("health_conditions")
+        ],
+        "variant_seed": int(snapshot.get("map", {}).get("id") or 0) * 1000003 + tick // 60000,
+        "altar_defs": [str(row.get("def_name")) for row in (dev.get("ideology") or {}).get("ritual_buildings", []) if row.get("def_name")],
+        "bench_defs": [str(row.get("def_name")) for row in dev.get("building_catalog", []) if row.get("is_work_table") and row.get("available_now")],
+    }
+    architecture_programs = architect.program_options(architecture_context) if architecture_material else {}
+    pending_projects = dev.get("construction_projects") or []
+    if (
+        survival_stable and architecture_programs and not pending_projects
+        and not issued_recently(map_state, "architecture_project", tick, retry_ticks=90000)
+    ):
+        details["architecture_context"] = architecture_context
+        details["architecture_program_options"] = architecture_programs
+        dev["architecture_context"] = architecture_context
+        dev["architecture_program_options"] = architecture_programs
+        one_time.append("plan_architecture")
 
     sculptures = [
         row for row in dev.get("things", [])
@@ -1315,13 +1429,28 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
         one_time.append("build_prison")
     hospital_a = {"x": int(anchor["x"]) + 25, "z": int(anchor["z"])}
     hospital_b = {"x": hospital_a["x"] + 6, "z": hospital_a["z"] + 6}
+    hospital_rects = [(hospital_a, hospital_b)]
+    for project in map_state.get("architecture_projects", []):
+        if project.get("program") != "hospital":
+            continue
+        origin = project.get("origin") or {}
+        start = {"x": int(origin.get("x") or 0), "z": int(origin.get("z") or 0)}
+        end = {
+            "x": start["x"] + int(project.get("width") or 1) - 1,
+            "z": start["z"] + int(project.get("height") or 1) - 1,
+        }
+        hospital_rects.append((start, end))
     hospital_beds = [
         b for b in dev.get("buildings", [])
-        if hospital_a["x"] <= int((b.get("position") or {}).get("x") or -999) <= hospital_b["x"]
-        and hospital_a["z"] <= int((b.get("position") or {}).get("z") or -999) <= hospital_b["z"]
+        if any(
+            start["x"] <= int((b.get("position") or {}).get("x") or -999) <= end["x"]
+            and start["z"] <= int((b.get("position") or {}).get("z") or -999) <= end["z"]
+            for start, end in hospital_rects
+        )
         and str(b.get("def") or "") in {"Bed", "HospitalBed", "SleepingSpot"}
     ]
-    if survival_stable and int(item_counts.get("WoodLog") or 0) >= 180 and "hospital_blueprint" not in map_state.setdefault("issued", {}):
+    has_generated_hospital = any(row.get("program") == "hospital" for row in map_state.get("architecture_projects", []))
+    if survival_stable and not has_generated_hospital and int(item_counts.get("WoodLog") or 0) >= 180 and "hospital_blueprint" not in map_state.setdefault("issued", {}):
         one_time.append("build_hospital")
     elif hospital_beds and not all(bool(b.get("medical")) for b in hospital_beds) and not issued_recently(map_state, "hospital_beds", tick, retry_ticks=15000):
         one_time.append("configure_hospital_beds")
@@ -1711,10 +1840,21 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
 
 def build_decision_state(snapshot: dict[str, Any]) -> dict[str, Any]:
     capabilities: dict[str, dict[str, Any]] = {}
-    for skill_name in ("Construction", "Plants", "Animals", "Shooting", "Medicine", "Intellectual", "Cooking", "Mining", "Artistic", "Crafting"):
+    all_skill_names = sorted({
+        str(skill_name)
+        for colonist in snapshot.get("colonists", [])
+        for skill_name in (colonist.get("skills") or {})
+    })
+    for skill_name in all_skill_names:
         ranked = sorted(snapshot.get("colonists", []), key=lambda c: int((c.get("skills", {}).get(skill_name) or {}).get("level") or 0), reverse=True)
         if ranked:
-            capabilities[skill_name] = {"best": ranked[0].get("name"), "level": int((ranked[0].get("skills", {}).get(skill_name) or {}).get("level") or 0)}
+            skill = (ranked[0].get("skills", {}).get(skill_name) or {})
+            capabilities[skill_name] = {
+                "best": ranked[0].get("name"),
+                "level": int(skill.get("level") or 0),
+                "passion": professions.passion_info(skill.get("passion"))["icon"],
+                "learning_percent": professions.passion_info(skill.get("passion"))["xp_percent"],
+            }
     people = []
     for c in snapshot.get("colonists", [])[:12]:
         people.append({
@@ -1723,6 +1863,15 @@ def build_decision_state(snapshot: dict[str, Any]) -> dict[str, Any]:
             "traits": [t.get("label") or t.get("name") for t in c.get("traits", [])],
             "capacities": c.get("capacities", {}), "pain": c.get("pain", 0),
             "conditions": [f"{h.get('label') or h.get('def_name')}:{h.get('part')}" for h in c.get("health_conditions", [])],
+            "skills": {
+                name: {
+                    "level": int(row.get("level") or 0),
+                    "flame": professions.passion_info(row.get("passion"))["icon"],
+                    "learning_percent": professions.passion_info(row.get("passion"))["xp_percent"],
+                    "disabled": bool(row.get("disabled")),
+                }
+                for name, row in (c.get("skills") or {}).items()
+            },
         })
     dev = snapshot.get("development", {})
     return {
@@ -1739,20 +1888,24 @@ def build_decision_state(snapshot: dict[str, Any]) -> dict[str, Any]:
             "corpse_context": dev.get("corpse_context"), "organ_context": dev.get("organ_context"),
             "trade_goods_value": dev.get("trade_value", 0), "income_strategy": dev.get("income_strategy"), "doctrine": dev.get("doctrine"),
             "weather": dev.get("weather"), "growing_period": (dev.get("tile_details") or {}).get("growing_period"),
-            "rooms": [{"id": r.get("id"), "role": r.get("role_label"), "cleanliness": r.get("cleanliness"), "impressiveness": r.get("impressiveness")} for r in dev.get("rooms", []) if not r.get("touches_map_edge")][:20],
+            "rooms": [{"id": r.get("id"), "role": r.get("role_label"), "cleanliness": r.get("cleanliness"), "impressiveness": r.get("impressiveness"), "temperature": r.get("temperature"), "average_glow": r.get("average_glow"), "dark_percent": r.get("dark_cells_percent")} for r in dev.get("rooms", []) if not r.get("touches_map_edge")][:20],
             "storage_utilization_percent": (dev.get("storage") or {}).get("utilization_percent", 0),
             "materials": {name: dev.get("item_counts", {}).get(name, 0) for name in ("Silver", "WoodLog", "Steel", "ComponentIndustrial", "MedicineHerbal", "MedicineIndustrial", "Ambrosia")},
+            "profession_direction_fit": (dev.get("profession_context") or {}).get("directions", {}),
+            "all_loaded_work_types": (dev.get("profession_context") or {}).get("work_types", []),
+            "building_catalog": dev.get("building_catalog_summary", {}),
+            "royalty": dev.get("royalty", {}),
         },
     }
 
 
 def action_domain(name: str) -> str:
     if name.startswith(("income_", "trade_to:", "raid_to:", "prisoner_policy:")): return "economy_diplomacy"
-    if name.startswith(("prioritize_", "harvest_", "designate_", "start_", "breed_")): return "work_orders"
+    if name.startswith(("prioritize_", "harvest_", "designate_", "start_", "breed_")) or name in {"develop_colonist_skill", "optimize_night_owl_schedule"}: return "work_orders"
     if name.startswith(("build_killbox", "build_fallback", "build_turret", "build_mortar", "build_firefoam", "process_mechanoids")): return "defense"
     if name in {"care_for_injured_animal", "feed_hungry_animal", "build_hospital", "configure_hospital_beds", "build_prison"}: return "care"
     if name in {"unforbid_corpses", "create_human_corpse_dump", "create_animal_corpse_dump", "build_cemetery", "build_crematorium"}: return "corpse_management"
-    if name.startswith(("build_", "create_", "expand_", "floor_", "install_", "commission_", "excavate_", "finish_")): return "construction"
+    if name.startswith(("build_", "create_", "expand_", "floor_", "install_", "commission_", "excavate_", "finish_")) or name in {"plan_architecture", "improve_room_lighting", "upgrade_workbench"}: return "construction"
     return "strategy"
 
 
@@ -1762,6 +1915,8 @@ def action_family(name: str) -> str:
     if name.startswith("income_"): return "income_strategy"
     if name.startswith("prioritize_"): return "work_priority"
     if name.startswith("build_"): return "building_project"
+    if name in {"plan_architecture", "improve_room_lighting", "upgrade_workbench"}: return "building_project"
+    if name in {"develop_colonist_skill", "optimize_night_owl_schedule"}: return "workforce_development"
     if name.startswith("create_"): return "zone_or_production"
     return name.split(":", 1)[0]
 
@@ -1788,7 +1943,49 @@ def worker_criteria(snapshot: dict[str, Any], skill_name: str) -> dict[str, str]
 def subchoice_questions_for_action(action: str, snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
     dev = snapshot.get("development", {})
     q: dict[str, dict[str, Any]] = {}
-    if action.startswith("trade_to:"):
+    if action == "plan_architecture" and dev.get("architecture_program_options"):
+        q["architecture_program"] = {
+            "type": "choice",
+            "instructions": "Choose the function of the next building first. Layout, size and furniture are asked only after this program is selected.",
+            "criteria": dict(dev["architecture_program_options"]),
+        }
+    elif action == "improve_room_lighting" and dev.get("dark_room_options"):
+        q["lighting_room"] = {
+            "type": "choice",
+            "instructions": "Choose the room where darkness currently causes the most work, treatment or quality loss.",
+            "criteria": {
+                str(key): f"{row.get('role')} room {row.get('room_id')}; average glow {row.get('average_glow')}; {row.get('dark_percent')}% dark; {row.get('temperature')} C"
+                for key, row in dev["dark_room_options"].items()
+            },
+        }
+    elif action == "develop_colonist_skill" and dev.get("skill_training_options"):
+        q["skill_training_plan"] = {
+            "type": "choice",
+            "instructions": "Choose one real colonist-skill-work plan. Large flame learns at 150%, small flame at 100%, no flame at 35%; also consider current competence, Fast/Slow Learner traits and colony gaps.",
+            "criteria": {
+                str(key): (
+                    f"{row.get('pawn_name')}: {row.get('skill')} {row.get('level')} {row.get('flame')} "
+                    f"({row.get('xp_percent')}% passion multiplier, learning factor {row.get('learning_trait_factor')}); "
+                    f"train through {', '.join(row.get('work_types') or [])}; traits {row.get('traits')}"
+                ) for key, row in dev["skill_training_options"].items()
+            },
+        }
+    elif action == "optimize_night_owl_schedule" and dev.get("night_owl_options"):
+        q["night_owl_pawn"] = {
+            "type": "choice",
+            "instructions": "Choose which Night Owl receives a day-sleep/night-awake timetable now.",
+            "criteria": dict(dev["night_owl_options"]),
+        }
+    elif action == "upgrade_workbench" and dev.get("workbench_upgrade_options"):
+        q["workbench_upgrade"] = {
+            "type": "choice",
+            "instructions": "Choose one unlocked and affordable production transition. The old bench remains until the new one is completed.",
+            "criteria": {
+                str(key): f"{row.get('old')} -> {row.get('new')}: {row.get('benefit')}; research {row.get('research')}; fixed costs {row.get('costs')}"
+                for key, row in dev["workbench_upgrade_options"].items()
+            },
+        }
+    elif action.startswith("trade_to:"):
         q["trade_purchase_plan"] = {"type": "choice", "instructions": "Choose a purchase priority; survival reserves are protected by code.", "criteria": {
             "medicine": "Medicine", "components": "Components and advanced components", "food": "Shelf-stable food",
             "weapons": "Weapons or armor", "livestock": "Productive or pack animals", "none": "Sell only and preserve silver",
@@ -1849,6 +2046,15 @@ def subchoice_questions_for_action(action: str, snapshot: dict[str, Any]) -> dic
             "doctrine_economy": {"type": "choice", "instructions": "Choose long-term cash engine.", "criteria": {"drugs": "Drugs", "tailoring": "Apparel", "art": "Sculptures", "livestock": "Animals/products", "biofuel": "Chemfuel", "mining": "Minerals", "crops": "Surplus crops", "brewing": "Beer", "travel_food": "Caravan food", "orbital": "Orbital trade", "organs": "Prisoner organs with medical/social costs"}},
             "doctrine_beauty": {"type": "choice", "instructions": "Choose where beauty matters first.", "criteria": {"shared_first": "Dining/rec", "bedrooms_first": "Bedrooms", "hospital_work_first": "Hospital/work", "balanced": "Weakest valuable room"}},
         })
+        direction_descriptions = professions.direction_choice_descriptions({
+            "directions": d.get("profession_directions") or {}
+        })
+        if direction_descriptions:
+            q["doctrine_specialization"] = {
+                "type": "choice",
+                "instructions": "Choose a strategic direction that the actual colonists can support. Skills, passion flames and disabled work matter more than a generic ideal build.",
+                "criteria": direction_descriptions,
+            }
     return {name: question for name, question in q.items() if question.get("criteria")}
 
 
@@ -1902,7 +2108,7 @@ def choose_action(agent: Any, snapshot: dict[str, Any], candidates: list[str]) -
             selected = str(raw_details.get("answers", {}).get(question_id, {}).get("choice") or "")
             if selected not in question["criteria"]:
                 continue
-            if question_id in {"tame_target", "hunt_target", "worker_pawn", "construction_project"}:
+            if question_id in {"tame_target", "hunt_target", "worker_pawn", "construction_project", "night_owl_pawn"}:
                 parsed[question_id] = int(selected)
             else:
                 parsed[question_id] = selected
@@ -1917,6 +2123,49 @@ def choose_action(agent: Any, snapshot: dict[str, Any], candidates: list[str]) -
             if selected in mining: parsed["doctrine_mining_product"] = selected
             merged_answers.update(third.get("answers", {}))
             if raw_details is None: raw_details = {"answers": {}}
+
+    if choice == "plan_architecture" and parsed.get("architecture_program"):
+        program = str(parsed["architecture_program"])
+        architecture_context = snapshot.get("development", {}).get("architecture_context") or {}
+        variants = architect.generate_program_variants(
+            program,
+            architecture_context,
+            seed=int(architecture_context.get("variant_seed") or 0),
+        )
+        considered_variants = variants
+        if program == "residence" and variants:
+            styles = {
+                style: description for style, description in architect.HOUSE_STYLES.items()
+                if any(row.get("style") == style for row in variants.values())
+            }
+            style_question = {
+                "architecture_house_style": {
+                    "type": "choice",
+                    "instructions": "Choose a house character. Four generated size/door/furniture variants will then be compared inside this style (24 possible houses total).",
+                    "criteria": styles,
+                }
+            }
+            style_raw = agent.predict(state, style_question)
+            style = str(style_raw.get("answers", {}).get("architecture_house_style", {}).get("choice") or "")
+            if style not in styles:
+                style = next(iter(styles))
+            parsed["architecture_house_style"] = style
+            considered_variants = {key: row for key, row in variants.items() if row.get("style") == style}
+            merged_answers.update(style_raw.get("answers", {}))
+        if considered_variants:
+            variant_question = {
+                "architecture_variant": {
+                    "type": "choice",
+                    "instructions": "Choose the exact generated layout. Every option is enclosed, lit and uses only the selected building program; code will still let RimWorld validate placement.",
+                    "criteria": {key: row.get("summary") for key, row in considered_variants.items()},
+                }
+            }
+            variant_raw = agent.predict(state, variant_question)
+            variant = str(variant_raw.get("answers", {}).get("architecture_variant", {}).get("choice") or "")
+            if variant not in considered_variants:
+                variant = next(iter(considered_variants))
+            parsed["architecture_variant"] = variant
+            merged_answers.update(variant_raw.get("answers", {}))
 
     aliases = {"trade_purchase_plan": "trade_purchase"}
     for source, target in aliases.items():
@@ -2096,6 +2345,130 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
     anchor = map_state["anchor"]
     issued = map_state.setdefault("issued", {})
 
+    if choice == "plan_architecture":
+        program = str(details.get("architecture_program") or "")
+        variant_id = str(details.get("architecture_variant") or "")
+        context = details.get("architecture_context") or {}
+        variants = architect.generate_program_variants(
+            program, context, seed=int(context.get("variant_seed") or 0)
+        ) if program else {}
+        selected = variants.get(variant_id)
+        if not selected:
+            return {"applied": False, "reason": "Laya did not select a valid generated architecture variant"}
+        sequence = int(map_state.get("architecture_sequence") or 0)
+        desired = {
+            "x": int(anchor["x"]) + 32 + (sequence % 3) * 16,
+            "z": int(anchor["z"]) - 18 + (sequence // 3) * 16,
+        }
+        terrain = client.get("/api/v1/map/terrain", map_id=map_id)
+        origin = find_terrain_rect(
+            terrain,
+            desired,
+            int(selected["width"]),
+            int(selected["height"]),
+            {"Soil", "SoilRich", "Gravel", "Sand", "MarshyTerrain"},
+            radius=35,
+        ) or desired
+        response = client.post("/api/v1/builder/blueprint", body={
+            "map_id": map_id,
+            "position": position(origin["x"], origin["z"]),
+            "blueprint": selected["layout"],
+            "clear_obstacles": False,
+        })
+        project = {
+            "program": program,
+            "variant": variant_id,
+            "style": selected.get("style"),
+            "origin": origin,
+            "width": int(selected["width"]),
+            "height": int(selected["height"]),
+            "issued_tick": tick,
+        }
+        map_state.setdefault("architecture_projects", []).append(project)
+        map_state["architecture_sequence"] = sequence + 1
+        issued["architecture_project"] = tick
+        issued[f"architecture:{program}:{sequence}"] = tick
+        return {
+            "applied": True,
+            "project": project,
+            "summary": selected.get("summary"),
+            "blueprint": response,
+            "construction": prioritize(client, snapshot, "Construction"),
+        }
+
+    if choice == "improve_room_lighting":
+        key = str(details.get("lighting_room") or "")
+        room = (details.get("dark_room_options") or {}).get(key)
+        if not room or not room.get("placement_cells"):
+            return {"applied": False, "reason": "No verified empty placement cell remains in the chosen dark room"}
+        target = room["placement_cells"][0]
+        powered = "Electricity" in set(map(str, snapshot.get("development", {}).get("finished_research") or []))
+        light_def = "StandingLamp" if powered else "TorchLamp"
+        response = client.post("/api/v1/builder/blueprint", body={
+            "map_id": map_id,
+            "position": position(int(target["x"]), int(target["z"])),
+            "blueprint": architect.blueprint([architect.building(light_def, 0, 0)], 1, 1),
+            "clear_obstacles": False,
+        })
+        issued["room_lighting"] = tick
+        issued[f"room_lighting:{room.get('room_id')}"] = tick
+        return {"applied": True, "room": room, "light": light_def, "response": response}
+
+    if choice == "develop_colonist_skill":
+        key = str(details.get("skill_training_plan") or "")
+        plan = (details.get("skill_training_options") or {}).get(key)
+        if not plan:
+            return {"applied": False, "reason": "Laya did not select a valid skill-development plan"}
+        response = client.post("/api/v1/colonist/work-priority", body={
+            "id": int(plan["pawn_id"]),
+            "work": str(plan["work_type"]),
+            "priority": 2,
+        })
+        map_state.setdefault("skill_development_plans", {})[str(plan["pawn_id"])] = {
+            "skill": plan["skill"], "work_type": plan["work_type"], "started_tick": tick,
+            "passion": plan["passion"],
+        }
+        issued["skill_development"] = tick
+        return {"applied": True, "plan": plan, "response": response}
+
+    if choice == "optimize_night_owl_schedule":
+        pawn_id = details.get("night_owl_pawn")
+        if pawn_id is None or str(pawn_id) not in (details.get("night_owl_options") or {}):
+            return {"applied": False, "reason": "Laya did not select a valid Night Owl colonist"}
+        responses = [
+            client.post("/api/v1/colonist/time-assignment", body={
+                "pawn_id": int(pawn_id), "hour": hour, "assignment": assignment,
+            })
+            for hour, assignment in professions.night_owl_schedule().items()
+        ]
+        scheduled = map_state.setdefault("night_owl_schedules", [])
+        if int(pawn_id) not in scheduled:
+            scheduled.append(int(pawn_id))
+        issued[f"night_owl:{int(pawn_id)}"] = tick
+        return {"applied": True, "pawn_id": int(pawn_id), "schedule": professions.night_owl_schedule(), "responses": responses}
+
+    if choice == "upgrade_workbench":
+        key = str(details.get("workbench_upgrade") or "")
+        plan = (details.get("workbench_upgrade_options") or {}).get(key)
+        if not plan:
+            return {"applied": False, "reason": "Laya did not select a valid workbench transition"}
+        old = next((row for row in snapshot.get("development", {}).get("buildings", []) if str(row.get("def")) == str(plan["old"])), None)
+        if not old:
+            return {"applied": False, "reason": f"Source workbench {plan['old']} is no longer present"}
+        old_pos = old.get("position") or anchor
+        target_row = next((row for row in snapshot.get("development", {}).get("building_catalog", []) if row.get("def_name") == plan["new"]), {})
+        stuff = plan.get("stuff")
+        response = client.post("/api/v1/builder/blueprint", body={
+            "map_id": map_id,
+            "position": position(int(old_pos.get("x") or 0) + 4, int(old_pos.get("z") or 0)),
+            "blueprint": architect.blueprint([architect.building(str(plan["new"]), 0, 0, stuff=stuff, rotation=2)], max(3, int(target_row.get("size_x") or 3)), max(2, int(target_row.get("size_z") or 2))),
+            "clear_obstacles": False,
+        })
+        issued["workbench_upgrade"] = tick
+        issued[f"workbench_upgrade:{plan['new']}"] = tick
+        map_state.setdefault("workbench_upgrades", []).append({**plan, "issued_tick": tick, "old_retained": True})
+        return {"applied": True, "transition": plan, "old_retained": True, "response": response}
+
     if choice == "choose_colony_doctrine":
         doctrine = {
             "settlement_form": details.get("doctrine_settlement_form") or "compact",
@@ -2105,6 +2478,7 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
             "economy": details.get("doctrine_economy") or "crops",
             "mining_product": details.get("doctrine_mining_product"),
             "beauty": details.get("doctrine_beauty") or "shared_first",
+            "specialization": details.get("doctrine_specialization") or "food_agriculture",
         }
         map_state["doctrine"] = doctrine
         map_state["doctrine_tick"] = tick
@@ -2301,10 +2675,25 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
         issued["hospital_blueprint"] = tick
         return {"applied": True, "blueprint": result, "construction": prioritize(client, snapshot, "Construction")}
     if choice == "configure_hospital_beds":
+        generated_hospitals = [
+            row for row in map_state.get("architecture_projects", [])
+            if row.get("program") == "hospital"
+        ]
+        if generated_hospitals:
+            hospital = generated_hospitals[-1]
+            start = hospital["origin"]
+            point_a = position(int(start["x"]), int(start["z"]))
+            point_b = position(
+                int(start["x"]) + int(hospital["width"]) - 1,
+                int(start["z"]) + int(hospital["height"]) - 1,
+            )
+        else:
+            point_a = position(anchor["x"] + 25, anchor["z"])
+            point_b = position(anchor["x"] + 31, anchor["z"] + 6)
         result = client.post("/api/v1/map/beds/configure", body={
             "map_id": map_id,
-            "point_a": position(anchor["x"] + 25, anchor["z"]),
-            "point_b": position(anchor["x"] + 31, anchor["z"] + 6),
+            "point_a": point_a,
+            "point_b": point_b,
             "medical": True,
             "for_prisoners": False,
         })
@@ -2943,8 +3332,10 @@ def run_development_cycle(client: bridge.RimApiClient, agent: Any, state: dict[s
         "temple_altar", "temple_material",
         "doctrine_settlement_form", "doctrine_material", "doctrine_diplomacy",
         "doctrine_military", "doctrine_economy", "doctrine_mining_product",
-        "doctrine_beauty", "sculpture_install_plan", "animal_barn_material",
-        "animal_barn_floor",
+        "doctrine_beauty", "doctrine_specialization", "sculpture_install_plan", "animal_barn_material",
+        "animal_barn_floor", "architecture_program", "architecture_house_style",
+        "architecture_variant", "lighting_room", "skill_training_plan",
+        "night_owl_pawn", "workbench_upgrade",
     ):
         if decision.get(key) is not None:
             details[key] = decision[key]

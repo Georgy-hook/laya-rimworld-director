@@ -16,7 +16,14 @@ The project is unofficial and experimental. It can make bad decisions and lose a
 - Farming: select crops, consider current season and forecast temperatures, pause late sowing without destroying existing crops, and resume viable seasonal sowing.
 - Storage: expand near-full stockpiles, configure dedicated weapon shelves, place stone chunks beside the stonecutter, animal carcasses beside butchering, and human corpses in a distant critical-priority dump.
 - Housing and rooms: choose compact, courtyard, separate-house or mountain development; choose real available construction materials; build private bedrooms without replacing existing rooms.
+- Procedural architecture: choose a building program before its layout; generate 24 residential designs plus context-aware compounds, dining/rec halls, kitchens, hospitals, throne rooms, temples, workshops, factories, labs, warehouses, prisons, barns, nurseries, defenses and utility blocks from the definitions loaded by the current game.
+- Workforce direction: inspect every loaded `WorkTypeDef` (including DLC/mod jobs), score long-term specializations against the actual colonists, and persist the chosen specialization in the colony doctrine.
+- Skills and passions: compare current level, disabled work, health, learning traits and no/small/large passion flames (35%/100%/150% XP multipliers), then let Laya choose a colonist-skill-work training plan.
+- Schedules: detect the Night Owl trait and let Laya move that colonist to daytime sleep (11:00–18:59) with a flexible nighttime schedule.
 - Beauty and hygiene: measure room cleanliness and impressiveness, choose kitchen/hospital floors, commission sculptures and install finished art in a selected real room.
+- Light and climate: measure actual glow and temperature per room, expose dark work/medical rooms to Laya, and add powered lamps or torches to verified free cells. Darkness begins below 30% light and can reduce movement/work speed; surgery benefits from at least 50% light.
+- Hospitals: progress from ordinary medical beds to hospital beds, central vitals monitoring and sterile/metal flooring as research, skill and materials become available.
+- Production progression: offer normal successor benches (butcher spot → table, fueled → electric, simple → hi-tech, machining → fabrication) only after research and costs are satisfied, while retaining the old bench until the replacement is built.
 - Animals: feed and rescue colony animals, avoid repeatedly treating an already-bandaged animal, make sleeping spots, build climate-aware barns, use optional straw matting, tame a selected species/sex and plan breeding.
 - Industry and income: stonecutting, drugs, clothing, sculptures, livestock products, chemfuel, valuable minerals, crops, beer, travel food, orbital trade, and an explicit high-risk prisoner-organ route.
 - Diplomacy and travel: choose a real friendly settlement, form a safe trade caravan, retain home defenders and supplies, and resolve prisoner recruit/release/sale plans through normal systems.
@@ -100,7 +107,8 @@ Each cycle follows a hierarchical decision pipeline:
 3. If the list is large, choose a domain and action family first.
 4. Choose one concrete action.
 5. Ask only for parameters belonging to that selected action; rejecting hunting never asks for prey, and rejecting wild harvest never asks for a plant.
-6. Validate the selected choice again and translate it into normal game commands.
+6. For architecture, choose program → house style when relevant → one bounded generated variant; the other programs and layouts are never evaluated.
+7. Validate the selected choice again and translate it into normal game commands.
 
 Emergency survival gates run before long-horizon planning. Combat is checked much more often than ordinary development. Repeated orders are suppressed using a persistent state file and signatures of active combatants/jobs.
 
@@ -114,6 +122,8 @@ RimWorld 1.6
 modified RIMAPI (C#, Harmony)
   ↕ verified JSON state / normal gameplay commands
 colony_director.py
+  ↳ colony_professions.py (live professions, passions, training, schedules)
+  ↳ colony_architect.py (programs, technology gates, procedural layouts)
   ↕ typed questions + probabilities
 convaiinnovations/laya (local PyTorch model)
 
@@ -124,6 +134,8 @@ laya_control.py / in-game overlay
 Important files:
 
 - `colony_director.py` — long-horizon autonomous planner and executor.
+- `colony_professions.py` — profession-fit scoring, passion-aware skill development and Night Owl schedules.
+- `colony_architect.py` — live building catalog interpretation and procedural room/base design.
 - `rimworld_laya.py` — local API client and combat decision loop.
 - `laya_control.py` — Windows GUI.
 - `vendor/RIMAPI/` — complete corresponding source and compiled RimWorld 1.6 assembly for the modified GPL-3.0 mod.
@@ -137,7 +149,7 @@ Python:
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m py_compile colony_director.py rimworld_laya.py laya_control.py
+.\.venv\Scripts\python.exe -m py_compile colony_director.py colony_professions.py colony_architect.py rimworld_laya.py laya_control.py
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
@@ -147,7 +159,7 @@ Modified RIMAPI (requires the .NET 8 SDK; targets .NET Framework 4.7.2 through r
 dotnet build vendor\RIMAPI\Source\RIMAPI\RimApi.csproj -c Release-1.6
 ```
 
-The 0.0.2 development branch passes 34 Python tests and compiles the C# mod with zero warnings/errors.
+The 0.0.2 development branch passes 44 Python tests and compiles the C# mod with zero warnings/errors.
 
 ## Data and privacy
 

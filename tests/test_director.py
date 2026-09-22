@@ -240,6 +240,139 @@ class DirectorTests(unittest.TestCase):
         }, {"x": 8, "z": 8})
         self.assertEqual(rect, ({"x": 5, "y": 0, "z": 4}, {"x": 11, "y": 0, "z": 10}))
 
+    def test_architect_generates_twenty_four_distinct_lit_houses(self):
+        candidates = director.architect.generate_house_candidates(
+            "BlocksGranite",
+            [],
+            {"Stonecutting", "Electricity", "ComplexFurniture"},
+            {"BlocksGranite": 5000, "WoodLog": 2000},
+            powered=True,
+            climate="temperate",
+            seed=91,
+        )
+        self.assertEqual(len(candidates), 24)
+        signatures = {
+            (row["style"], row["width"], row["height"], row["summary"])
+            for row in candidates.values()
+        }
+        self.assertEqual(len(signatures), 24)
+        for row in candidates.values():
+            defs = [item["def_name"] for item in row["layout"]["buildings"]]
+            self.assertIn("Door", defs)
+            self.assertIn("StandingLamp", defs)
+            self.assertTrue("Bed" in defs or "DoubleBed" in defs)
+
+    def test_house_generation_is_deterministic_for_saved_seed(self):
+        args = ("WoodLog", [], {"Electricity"}, {"WoodLog": 4000})
+        first = director.architect.generate_house_candidates(*args, powered=True, climate="cold", seed=7)
+        second = director.architect.generate_house_candidates(*args, powered=True, climate="cold", seed=7)
+        self.assertEqual(first, second)
+
+    def test_hospital_variant_upgrades_beds_monitor_floor_and_light(self):
+        catalog = [
+            {"def_name": name, "available_now": True}
+            for name in ("HospitalBed", "VitalsMonitor", "StandingLamp", "Shelf", "Wall", "Door")
+        ]
+        variants = director.architect.generate_program_variants("hospital", {
+            "building_catalog": catalog,
+            "finished_research": ["Electricity", "SterileMaterials"],
+            "item_counts": {"Silver": 10000, "Steel": 5000},
+            "material": "BlocksGranite",
+            "powered": True,
+            "climate": "temperate",
+        })
+        expanded = variants["hospital_3"]["layout"]
+        defs = [row["def_name"] for row in expanded["buildings"]]
+        self.assertGreaterEqual(defs.count("HospitalBed"), 4)
+        self.assertIn("VitalsMonitor", defs)
+        self.assertIn("StandingLamp", defs)
+        self.assertTrue(expanded["floors"])
+        self.assertTrue(all(row["def_name"] == "SterileTile" for row in expanded["floors"]))
+
+    def test_throne_room_never_contains_beds_or_workbenches(self):
+        catalog = [
+            {"def_name": name, "available_now": True}
+            for name in ("Throne", "GrandThrone", "Brazier", "Column", "Drape", "StandingLamp")
+        ]
+        layout = director.architect.generate_program_variants("throne_room", {
+            "building_catalog": catalog,
+            "finished_research": ["Electricity", "Stonecutting"],
+            "item_counts": {"BlocksGranite": 10000},
+            "material": "BlocksGranite",
+            "powered": True,
+            "royalty": {"colonists": [{"title_def_name": "Count"}]},
+        })["throne_room_2"]["layout"]
+        defs = {row["def_name"] for row in layout["buildings"]}
+        self.assertIn("GrandThrone", defs)
+        self.assertFalse(defs & {"Bed", "HospitalBed", "SimpleResearchBench", "FueledStove"})
+
+    def test_profession_direction_uses_large_passion_not_level_alone(self):
+        colonists = [
+            {"id": 1, "name": "Veteran", "health": 1, "skills": {"Crafting": {"level": 9, "passion": 0}}},
+            {"id": 2, "name": "Apprentice", "health": 1, "skills": {"Crafting": {"level": 5, "passion": 2}}},
+        ]
+        work = [{"def_name": "Crafting", "label": "Craft", "relevant_skills": ["Crafting"]}]
+        context = director.professions.profession_context(colonists, work)
+        craft_people = context["directions"]["craft_industry"]["people"]
+        self.assertEqual(craft_people[0]["pawn"], "Apprentice")
+        self.assertEqual(context["skills"]["Crafting"]["learning_percent"], 150)
+
+    def test_training_plan_maps_skill_to_live_modded_work_type(self):
+        colonists = [{
+            "id": 3, "name": "Learner", "health": 1, "downed": False,
+            "skills": {"Crafting": {"level": 4, "passion": 2, "disabled": False}},
+            "work_priorities": {"ModdedFabrication": {"disabled": False}}, "traits": [], "capacities": {},
+        }]
+        work = [{"def_name": "ModdedFabrication", "relevant_skills": ["Crafting"], "natural_priority": 10}]
+        options = director.professions.training_options(colonists, work)
+        self.assertEqual(next(iter(options.values()))["work_type"], "ModdedFabrication")
+        self.assertEqual(next(iter(options.values()))["xp_percent"], 150)
+
+    def test_night_owl_schedule_sleeps_in_daytime_window(self):
+        schedule = director.professions.night_owl_schedule()
+        self.assertTrue(all(schedule[hour] == "Sleep" for hour in range(11, 19)))
+        self.assertTrue(all(schedule[hour] == "Anything" for hour in list(range(0, 11)) + list(range(19, 24))))
+
+    def test_workbench_upgrade_waits_for_research_and_costs(self):
+        base = {
+            "building_counts": {"FueledStove": 1},
+            "item_counts": {"Steel": 200, "ComponentIndustrial": 5},
+            "building_catalog": [{
+                "def_name": "ElectricStove", "available_now": False,
+                "cost_list": [{"thing_def": "Steel", "count": 80}, {"thing_def": "ComponentIndustrial", "count": 2}],
+            }],
+        }
+        self.assertNotIn("FueledStove|ElectricStove", director.architect.workbench_upgrade_options(base))
+        base["building_catalog"][0]["available_now"] = True
+        self.assertIn("FueledStove|ElectricStove", director.architect.workbench_upgrade_options(base))
+
+    def test_rejected_architecture_does_not_ask_program_or_layout(self):
+        agent = self.FakeAgent(["hold_survival"])
+        snapshot = {"colonists": [], "game": {}, "map": {"resources": {}}, "development": {
+            "building_counts": {}, "zones": [],
+            "architecture_program_options": {"residence": "housing shortage"},
+            "architecture_context": {},
+        }}
+        result = director.choose_action(agent, snapshot, ["plan_architecture", "hold_survival"])
+        self.assertEqual(result["choice"], "hold_survival")
+        self.assertEqual(len(agent.calls), 1)
+
+    def test_selected_residence_uses_program_style_variant_hierarchy(self):
+        agent = self.FakeAgent(["plan_architecture", "residence", "compact", "house_compact_1"])
+        snapshot = {"colonists": [], "game": {}, "map": {"resources": {}}, "development": {
+            "building_counts": {}, "zones": [],
+            "architecture_program_options": {"residence": "housing shortage"},
+            "architecture_context": {
+                "building_catalog": [], "finished_research": [], "item_counts": {"WoodLog": 2000},
+                "material": "WoodLog", "powered": False, "climate": "temperate", "variant_seed": 1,
+            },
+        }}
+        result = director.choose_action(agent, snapshot, ["plan_architecture", "hold_survival"])
+        self.assertEqual(result["architecture_program"], "residence")
+        self.assertEqual(result["architecture_house_style"], "compact")
+        self.assertEqual(result["architecture_variant"], "house_compact_1")
+        self.assertEqual(len(agent.calls), 4)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -320,6 +320,7 @@ class ControlCenter(tk.Tk):
         else:
             text = (
                 f"Доктрина: {doctrine.get('settlement_form', '—')} · {doctrine.get('material', '—')} · "
+                f"профиль {doctrine.get('specialization', '—')} · "
                 f"экономика {doctrine.get('economy', '—')} · дипломатия {doctrine.get('diplomacy', '—')} · "
                 f"армия {doctrine.get('military', '—')} · красота {doctrine.get('beauty', '—')}"
             )
