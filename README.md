@@ -1,10 +1,10 @@
-# Laya RimWorld Director
+# RimWorld Autopilot
 
 > Experimental autonomous colony management for RimWorld 1.6, powered by the local open-weight Laya decision model.
 
 Version **0.0.2 (developing)** · Windows · Python 3.10+ · RimWorld 1.6 · GPL-3.0
 
-Laya RimWorld Director reads a colony through a modified local RIMAPI mod, gives the model a bounded set of real and currently feasible choices, and converts the selected choice into ordinary RimWorld work priorities, designations, bills, blueprints, research, caravans and combat orders.
+RimWorld Autopilot reads a colony through a modified local RIMAPI mod, gives the Laya model a bounded set of real and currently feasible choices, and converts the selected choice into ordinary RimWorld work priorities, designations, bills, blueprints, research, caravans and combat orders.
 
 It is not a prerecorded build order. Laya sees compact context, chooses between alternatives with probabilities, keeps a persistent colony doctrine, and can revise that doctrine when resources or conditions change. The long-term objective is a self-sufficient colony pursuing the ending or continuity strategy Laya selected from the content actually loaded in the game.
 
@@ -40,9 +40,9 @@ The project is unofficial and experimental. It can make bad decisions and lose a
 - Ancient Danger: treat the proximity warning as a sealed strategic site rather than a raid; Laya chooses to leave it, prepare, or designate a normal wall-deconstruction job to open it, then resumes the warning pause.
 - Content-aware doctrine v2: 30 Core/DLC strategic archetypes are composed with settlement, economy, technology, defense, society, diplomacy and all official endgame axes. Inactive DLC choices are hidden; the selected course, available catalogue and every cascade probability appear in the GUI.
 - Observability: an in-game overlay and Windows control center show choices, probabilities, results and exportable history.
-- Friendly control center: dark cartoon dashboard with an animated original mascot, sidebar navigation, soft shadows, Russian/English UI, friendly decision explanations and an optional technical view.
+- Friendly control center: dark fancy-cartoon dashboard with rounded cards, animated buttons and orbit effects, a panoramic colony scene, a coordinated original icon set, Russian/English UI, friendly decision explanations and an optional technical view.
 - Player guidance: eight priority weights, a personal instruction and peaceful/safety boundaries are read by development, combat and event decisions without bypassing feasibility gates.
-- One-click setup assistant: `Laya-Setup.exe` creates the isolated Python environment, installs packages, backs up/replaces the RIMAPI mod and writes local settings.
+- One-click setup assistant: `RimWorld-Autopilot-Setup.exe` installs to a chosen folder (by default `C:\Program Files\RimWorld Autopilot`), optionally adds a desktop shortcut, creates the isolated Python environment, installs packages, backs up/replaces the RIMAPI mod and writes local settings.
 
 ## Safety model
 
@@ -60,7 +60,7 @@ Prerequisites:
 4. An NVIDIA GPU is recommended; CPU mode is supported but slower.
 5. At least roughly 1 GB free for model weights and additional space for PyTorch.
 
-Download and extract `laya-rimworld-director-0.0.2.zip`, then open `Laya-Setup.exe`. Choose the RimWorld folder and press **Install everything**. The assistant handles Python packages and the bundled RIMAPI mod without a command line.
+Download and extract `rimworld-autopilot-0.0.2.zip`, then open `RimWorld-Autopilot-Setup.exe`. Choose the application and RimWorld folders, keep the desktop-shortcut option if desired, and press **Install Autopilot**. The assistant handles Python packages and the bundled RIMAPI mod without a command line.
 
 The PowerShell path remains available for maintainers:
 
@@ -81,14 +81,14 @@ For CPU inference:
 .\Install.ps1 -Device cpu
 ```
 
-The installer creates `.venv`, installs `laya==0.3.4`, backs up an existing local `Mods\RIMAPI` folder, installs the modified build, and creates a machine-local `laya-control.json`.
+The installer copies the application and its local artwork, creates `.venv`, installs `laya==0.3.4`, backs up an existing local `Mods\RIMAPI` folder, installs the modified build, and creates a machine-local `rimworld-autopilot.json`. Writable preferences and logs live under `%LOCALAPPDATA%\RimWorld Autopilot`, not Program Files.
 
 Then:
 
-1. In RimWorld, enable Harmony and **RIMAPI — Laya Director fork**.
+1. In RimWorld, enable Harmony and **RIMAPI — RimWorld Autopilot**.
 2. Restart RimWorld.
 3. Load a copied colony save.
-4. Run `Start-Autonomous.ps1` or open `Laya-Control-Center.exe` from the release and click **Запустить Laya**.
+4. Run `Start-Autonomous.ps1` or open `RimWorld-Autopilot.exe` and click **Запустить Laya**.
 5. The first start downloads `convaiinnovations/laya` from Hugging Face.
 
 Stop the console director with `Ctrl+C`, or click **Остановить** in the GUI.
@@ -141,7 +141,7 @@ colony_director.py
   ↕ typed questions + probabilities
 convaiinnovations/laya (local PyTorch model)
 
-laya_gui/ via laya_control.py / in-game overlay
+laya_gui/ via autopilot_control.py / in-game overlay
   ↳ status, doctrine, friendly history, personal priorities, export, start/stop
 ```
 
@@ -155,7 +155,7 @@ Important files:
 - `rimworld_laya.py` — local API client and combat decision loop.
 - `colony_combat.py` — tactical catalogue, threat-sensitive filtering and psycast choices.
 - `colony_events.py` — extensible event-family classification and response hierarchy.
-- `laya_control.py` — stable Windows GUI launcher.
+- `autopilot_control.py` — stable Windows GUI launcher (`laya_control.py` remains a compatibility entry point).
 - `laya_gui/` — themed bilingual interface, friendly history, process/export services and graphical setup assistant.
 - `laya_preferences.py` — validated player priority and safety guidance shared with all decision loops.
 - `GUI.md` — interface architecture and installer contract.
@@ -170,7 +170,7 @@ Python:
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m py_compile colony_director.py colony_professions.py colony_architect.py colony_strategy.py laya_preferences.py rimworld_laya.py laya_control.py laya_setup.py
+.\.venv\Scripts\python.exe -m py_compile colony_director.py colony_professions.py colony_architect.py colony_strategy.py laya_preferences.py rimworld_laya.py autopilot_control.py autopilot_setup.py
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
@@ -186,14 +186,14 @@ Reproducible Windows GUI binaries (creates a separate build environment):
 .\Build-GUI.ps1
 ```
 
-The 0.0.2 development branch passes 60 Python tests, smoke-tests both Tk applications and compiles the C# mod with zero warnings/errors.
+The 0.0.2 development branch passes 61 Python tests, smoke-tests both Tk applications and compiles the C# mod with zero warnings/errors.
 
 ## Data and privacy
 
 - Inference is local.
 - The model is downloaded from Hugging Face on first run.
 - The game API listens locally; do not expose port 8765 to a network.
-- `logs/`, save files, model caches, `laya-control.json` and `laya-preferences.json` are excluded from Git.
+- `logs/`, save files, model caches, `rimworld-autopilot.json` and `autopilot-preferences.json` are excluded from Git. Legacy Laya-named local files are ignored and migrated when present.
 - Decision logs may contain pawn names and colony details. Review them before sharing an export.
 
 ## Limitations

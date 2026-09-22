@@ -1,14 +1,15 @@
-# 0.0.2 — hierarchical decisions and colony logistics
+# 0.0.2 — RimWorld Autopilot, hierarchical decisions and colony logistics
 
 Development release focused on correcting the decision architecture and the survival failures observed in live colonies.
 
 Highlights:
 
-- redesigned dark fancy-cartoon GUI with sidebar navigation, soft shadows, animated original ImageGen mascot and responsive status cards;
+- renamed the product and repository to **RimWorld Autopilot**, while retaining Laya as the local decision model;
+- redesigned dark fancy-cartoon GUI with rounded cards, animated buttons/orbit particles, a panoramic colony scene, original ImageGen emblem, setup illustration and five coordinated navigation illustrations;
 - complete Russian/English interface with friendly default explanations and a switchable raw technical view;
 - persistent player guidance: eight priority weights, a personal note, peaceful preferences and an enforceable no-unprovoked-raids boundary;
 - compact normal logs plus opt-in diagnostic snapshots in technical logging mode;
-- graphical `Laya-Setup.exe` for the Python environment, packages, RIMAPI backup/install and local configuration;
+- graphical `RimWorld-Autopilot-Setup.exe` with a Program Files destination, optional desktop shortcut, Python environment, packages, RIMAPI backup/install and local configuration;
 - audited doctrine v2 with 30 strategic archetypes covering Core, Royalty, Ideology, Biotech, Anomaly and Odyssey;
 - active-package filtering so unavailable DLC mechanics cannot be selected, while future/mod definitions remain discoverable through live catalogues;
 - conditional doctrine cascade: domain → direction → compatible axes → selected economy product → mineral only for mining;
@@ -35,7 +36,7 @@ Highlights:
 - additive workbench upgrade chains that retain the old bench until its researched replacement is constructed;
 - a live building-definition catalog so DLC/mod construction is discoverable without hard-coding every Def;
 - stockpile priorities now preserve RimWorld's complete 0–5 range, so Critical food/corpse zones work as intended;
-- 60 deterministic Python tests, two GUI smoke tests and a zero-warning C# build.
+- 61 deterministic Python tests, two GUI smoke tests and a zero-warning C# build.
 
 The branch remains experimental. Use copied saves and review the GUI/overlay decision history.
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +34,16 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
 
 
 def preferences_path(base_dir: Path | None = None) -> Path:
-    return (base_dir or Path(__file__).resolve().parent) / "laya-preferences.json"
+    if base_dir is not None:
+        return base_dir / "autopilot-preferences.json"
+    configured = os.environ.get("RIMWORLD_AUTOPILOT_PREFERENCES")
+    if configured:
+        return Path(configured)
+    source_dir = Path(__file__).resolve().parent
+    program_roots = [Path(value).resolve() for key in ("ProgramFiles", "ProgramFiles(x86)") if (value := os.environ.get(key))]
+    if any(source_dir == root or root in source_dir.parents for root in program_roots):
+        return Path(os.environ.get("LOCALAPPDATA", str(source_dir))) / "RimWorld Autopilot" / "autopilot-preferences.json"
+    return source_dir / "autopilot-preferences.json"
 
 
 def load_preferences(path: Path | None = None) -> dict[str, Any]:
@@ -42,8 +52,13 @@ def load_preferences(path: Path | None = None) -> dict[str, Any]:
         "priorities": dict(DEFAULT_PRIORITIES),
         "safety": dict(DEFAULT_PREFERENCES["safety"]),
     }
+    source = path or preferences_path()
+    if path is None and not source.exists():
+        legacy = source.with_name("laya-preferences.json")
+        if legacy.exists():
+            source = legacy
     try:
-        loaded = json.loads((path or preferences_path()).read_text(encoding="utf-8-sig"))
+        loaded = json.loads(source.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
         return result
     if not isinstance(loaded, dict):

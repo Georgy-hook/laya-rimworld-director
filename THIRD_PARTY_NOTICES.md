@@ -1,6 +1,6 @@
 # Third-party notices
 
-Laya RimWorld Director exists because other people published useful work under open licenses. Thank you.
+RimWorld Autopilot exists because other people published useful work under open licenses. Thank you.
 
 - **Laya SDK and `convaiinnovations/laya` model weights** — Convai Innovations and contributors, Apache License 2.0. The weights are downloaded from Hugging Face on first use and are not redistributed in this repository.
 - **RIMAPI** — Ilya Chichkov / RedEyeDev and contributors, GPL-3.0. This repository contains a clearly labelled modified fork based on commit `dfa4b2909e132081898845d0c4936fcefa86c91c`, including its complete corresponding source and original license.

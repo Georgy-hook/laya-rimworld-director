@@ -43,13 +43,13 @@ Player guidance is a separate input, not a game command:
 
 ```text
 laya_gui priorities/note/safety boundaries
-  -> validated laya-preferences.json
+  -> validated autopilot-preferences.json
   -> compact player_preferences model context
   -> candidate ordering and explanation
   -> normal feasibility/safety validation still wins
 ```
 
-The UI itself is isolated in `laya_gui/`; `laya_control.py` is only a stable launcher. Normal history is deliberately user-facing. Technical mode changes both presentation and persistence: development cycles add full details/snapshots, while combat cycles retain their full snapshot only when that switch is active. See `GUI.md`.
+The UI itself is isolated in `laya_gui/`; `autopilot_control.py` is the public launcher and `laya_control.py` remains a compatibility entry point. Normal history is deliberately user-facing. Technical mode changes both presentation and persistence: development cycles add full details/snapshots, while combat cycles retain their full snapshot only when that switch is active. See `GUI.md`.
 
 Combat follows its own hierarchy:
 

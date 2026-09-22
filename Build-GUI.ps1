@@ -6,7 +6,8 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $buildEnvironment = Join-Path $projectRoot ".build-venv"
 $builder = Join-Path $buildEnvironment "Scripts\python.exe"
-$asset = Join-Path $projectRoot "assets\gui\laya-orbit-mascot.png"
+$assetRoot = Join-Path $projectRoot "assets\gui"
+$icon = Join-Path $assetRoot "autopilot-emblem.png"
 $distribution = Join-Path $projectRoot "dist"
 
 Push-Location $projectRoot
@@ -19,15 +20,15 @@ try {
     $shared = @(
         "--noconfirm", "--clean", "--onefile", "--windowed",
         "--distpath", $distribution,
-        "--add-data", "$asset;assets\gui",
-        "--icon", $asset
+        "--add-data", "$assetRoot;assets\gui",
+        "--icon", $icon
     )
 
-    & $builder -m PyInstaller @shared --name "Laya-Control-Center" (Join-Path $projectRoot "laya_control.py")
-    if ($LASTEXITCODE -ne 0) { throw "Laya Control Center build failed." }
+    & $builder -m PyInstaller @shared --name "RimWorld-Autopilot" (Join-Path $projectRoot "autopilot_control.py")
+    if ($LASTEXITCODE -ne 0) { throw "RimWorld Autopilot build failed." }
 
-    & $builder -m PyInstaller @shared --name "Laya-Setup" (Join-Path $projectRoot "laya_setup.py")
-    if ($LASTEXITCODE -ne 0) { throw "Laya Setup build failed." }
+    & $builder -m PyInstaller @shared --uac-admin --name "RimWorld-Autopilot-Setup" (Join-Path $projectRoot "autopilot_setup.py")
+    if ($LASTEXITCODE -ne 0) { throw "RimWorld Autopilot Setup build failed." }
 
     Write-Host "GUI executables are ready in $distribution"
 }

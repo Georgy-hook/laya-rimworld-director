@@ -1,4 +1,4 @@
-"""User-friendly Windows interface for Laya RimWorld Director."""
+"""User-friendly Windows interface for RimWorld Autopilot."""
 
 from .app import ControlCenter, run
 

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$RimWorldPath = "C:\Program Files (x86)\Steam\steamapps\common\RimWorld",
+    [string]$RimWorldPath = "C:\Program Files\Steam\steamapps\common\RimWorld",
     [ValidateSet("cuda", "cpu", "auto")]
     [string]$Device = "cuda"
 )
@@ -41,7 +41,7 @@ $config = [ordered]@{
     device = $Device
     interval = 10
 }
-$config | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $projectDir "laya-control.json") -Encoding UTF8
+$config | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $projectDir "rimworld-autopilot.json") -Encoding UTF8
 
-Write-Host "Installed Laya RimWorld Director 0.0.2."
-Write-Host "Enable Harmony and RIMAPI - Laya Director fork in RimWorld, restart the game, load a copied save, then run Start-Autonomous.ps1."
+Write-Host "Installed RimWorld Autopilot 0.0.2."
+Write-Host "Enable Harmony and RIMAPI - RimWorld Autopilot in RimWorld, restart the game, load a copied save, then run Start-Autonomous.ps1."

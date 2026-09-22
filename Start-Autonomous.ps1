@@ -3,13 +3,19 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$configPath = Join-Path $PSScriptRoot 'laya-control.json'
+$primaryConfigPath = Join-Path $PSScriptRoot 'rimworld-autopilot.json'
+$legacyConfigPath = Join-Path $PSScriptRoot 'laya-control.json'
+$configPath = if (Test-Path -LiteralPath $primaryConfigPath) { $primaryConfigPath } else { $legacyConfigPath }
 $config = if (Test-Path -LiteralPath $configPath) { Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json } else { $null }
 $python = if ($config -and $config.python_exe) { [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot $config.python_exe)) } else { Join-Path $PSScriptRoot '.venv\Scripts\python.exe' }
 $director = Join-Path $PSScriptRoot 'colony_director.py'
-$log = Join-Path $PSScriptRoot 'logs\decisions.jsonl'
-$state = Join-Path $PSScriptRoot 'logs\colony-state.json'
-$pidFile = Join-Path $PSScriptRoot 'logs\director.pid'
+$dataDir = Join-Path $env:LOCALAPPDATA 'RimWorld Autopilot'
+$env:RIMWORLD_AUTOPILOT_PREFERENCES = Join-Path $dataDir 'autopilot-preferences.json'
+$logDir = Join-Path $dataDir 'logs'
+New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+$log = Join-Path $logDir 'decisions.jsonl'
+$state = Join-Path $logDir 'colony-state.json'
+$pidFile = Join-Path $logDir 'director.pid'
 $device = if ($config -and $config.device) { [string]$config.device } else { 'cuda' }
 $apiUrl = if ($config -and $config.api_url) { [string]$config.api_url } else { 'http://localhost:8765' }
 $interval = if ($config -and $config.interval) { [int]$config.interval } else { 10 }

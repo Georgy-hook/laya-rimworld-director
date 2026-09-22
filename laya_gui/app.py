@@ -19,11 +19,11 @@ import laya_preferences
 
 from .i18n import PRIORITY_TEXT, QUESTION_TEXT, doctrine_view, humanize, tr
 from .services import (
-    APP_NAME, BASE_DIR, PREFERENCES_PATH, RESOURCE_DIR, export_bundle, export_history,
+    APP_NAME, BASE_DIR, DATA_DIR, PREFERENCES_PATH, RESOURCE_DIR, export_bundle, export_history,
     load_config, read_pid, request_json, start_director, stop_director, tail_jsonl,
     timestamped_export_name,
 )
-from .theme import COLORS, FONTS, ShadowCard, configure_styles, status_color
+from .theme import COLORS, FONTS, FancyButton, ShadowCard, configure_styles, status_color
 
 
 class ControlCenter(tk.Tk):
@@ -32,7 +32,7 @@ class ControlCenter(tk.Tk):
         if os.environ.get("LAYA_GUI_SMOKE_TEST") == "1":
             self.withdraw()
         self.config_data = load_config()
-        self.log_dir = BASE_DIR / "logs"
+        self.log_dir = DATA_DIR / "logs"
         self.log_path = self.log_dir / "decisions.jsonl"
         self.state_path = self.log_dir / "colony-state.json"
         self.pid_path = self.log_dir / "director.pid"
@@ -53,7 +53,8 @@ class ControlCenter(tk.Tk):
         self.after(70, self._animate_mascot)
 
     def _build_ui(self) -> None:
-        self.nav_buttons: dict[str, tk.Button] = {}
+        self.nav_buttons: dict[str, FancyButton] = {}
+        self.ui_images: dict[str, tk.PhotoImage] = {}
         self.pages: dict[str, tk.Frame] = {}
         self.priority_scales: dict[str, ttk.Scale] = {}
         self.priority_values: dict[str, tk.Label] = {}
@@ -91,28 +92,36 @@ class ControlCenter(tk.Tk):
     def _build_sidebar(self) -> None:
         self.mascot_canvas = tk.Canvas(self.sidebar, width=224, height=150, bg=COLORS["sidebar"], highlightthickness=0)
         self.mascot_canvas.pack(pady=(12, 0))
-        self.mascot_canvas.create_oval(58, 122, 168, 139, fill="#080A10", outline="")
+        self.mascot_canvas.create_oval(42, 119, 182, 139, fill="#080A10", outline="")
+        self.mascot_canvas.create_oval(38, 16, 186, 132, outline=COLORS["line"], width=1)
+        self.orbit_items = [
+            self.mascot_canvas.create_oval(0, 0, 7, 7, fill=color, outline="")
+            for color in (COLORS["cyan"], COLORS["violet"], COLORS["amber"])
+        ]
         self.mascot_item = None
-        asset = RESOURCE_DIR / "assets" / "gui" / "laya-orbit-mascot.png"
+        asset = RESOURCE_DIR / "assets" / "gui" / "autopilot-emblem.png"
         try:
             original = tk.PhotoImage(file=str(asset))
-            self.mascot_image = original.subsample(8, 8)
+            self.mascot_image = original.subsample(9, 9)
             self.mascot_item = self.mascot_canvas.create_image(113, 74, image=self.mascot_image)
         except tk.TclError:
             self.mascot_image = None
             self.mascot_canvas.create_text(112, 73, text="✦", fill=COLORS["cyan"], font=("Segoe UI Symbol", 46))
-        tk.Label(self.sidebar, text="LAYA", bg=COLORS["sidebar"], fg=COLORS["text"], font=("Segoe UI Black", 17)).pack()
-        tk.Label(self.sidebar, text="COLONY DIRECTOR", bg=COLORS["sidebar"], fg=COLORS["violet"], font=("Segoe UI Semibold", 8)).pack(pady=(0, 22))
+        tk.Label(self.sidebar, text="RIMWORLD", bg=COLORS["sidebar"], fg=COLORS["text"], font=("Segoe UI Black", 15)).pack()
+        tk.Label(self.sidebar, text="AUTOPILOT", bg=COLORS["sidebar"], fg=COLORS["cyan"], font=("Segoe UI Semibold", 9)).pack(pady=(0, 18))
 
-        icons = {"overview": "✦", "strategy": "◈", "priorities": "≋", "history": "◷", "settings": "⚙"}
         for page in ("overview", "strategy", "priorities", "history", "settings"):
-            button = tk.Button(
-                self.sidebar, text=f" {icons[page]}   {tr(self.language, page)}", anchor="w",
-                bg=COLORS["sidebar"], fg=COLORS["muted"], activebackground=COLORS["panel_alt"], activeforeground=COLORS["text"],
-                relief="flat", bd=0, padx=22, pady=12, font=("Segoe UI Semibold", 10), cursor="hand2",
+            try:
+                original = tk.PhotoImage(file=str(RESOURCE_DIR / "assets" / "gui" / f"nav-{page}.png"))
+                self.ui_images[f"nav-{page}"] = original.subsample(32, 32)
+            except tk.TclError:
+                self.ui_images[f"nav-{page}"] = None  # type: ignore[assignment]
+            button = FancyButton(
+                self.sidebar, text=tr(self.language, page), width=208, height=52, variant="ghost", align="left",
+                image=self.ui_images[f"nav-{page}"],
                 command=lambda name=page: self.switch_page(name),
             )
-            button.pack(fill="x", padx=10, pady=2)
+            button.pack(padx=10, pady=2)
             self.nav_buttons[page] = button
 
         self.sidebar_status = tk.Label(self.sidebar, text="", bg=COLORS["sidebar"], fg=COLORS["muted"], justify="left", anchor="w", font=FONTS["small"])
@@ -128,10 +137,9 @@ class ControlCenter(tk.Tk):
         self.page_subtitle = tk.Label(titles, text="", bg=COLORS["window"], fg=COLORS["muted"], font=FONTS["body"], anchor="w")
         self.page_subtitle.pack(anchor="w", pady=(2, 0))
 
-        self.language_button = tk.Button(
-            header, text="EN" if self.language == "ru" else "RU", command=lambda: self.set_language("en" if self.language == "ru" else "ru"),
-            bg=COLORS["panel_alt"], fg=COLORS["cyan"], activebackground=COLORS["line"], activeforeground=COLORS["cyan"],
-            relief="flat", bd=0, padx=12, pady=7, font=("Segoe UI Semibold", 9), cursor="hand2",
+        self.language_button = FancyButton(
+            header, text="🇬🇧  EN" if self.language == "ru" else "🇷🇺  RU", width=92, height=36, variant="soft",
+            command=lambda: self.set_language("en" if self.language == "ru" else "ru"),
         )
         self.language_button.pack(side="right", padx=(10, 0))
         self.game_chip = tk.Label(header, text=tr(self.language, "game_offline"), bg=COLORS["panel"], fg=COLORS["red"], padx=12, pady=7, font=("Segoe UI Semibold", 9))
@@ -146,6 +154,23 @@ class ControlCenter(tk.Tk):
 
     def _build_overview_page(self) -> None:
         page = self._new_page("overview")
+        art = ShadowCard(page, padx=0, pady=0, radius=22)
+        art.pack(fill="x", pady=(0, 14))
+        self.hero_canvas = tk.Canvas(art.body, height=188, bg=COLORS["navy"], highlightthickness=0, bd=0)
+        self.hero_canvas.pack(fill="x")
+        try:
+            original = tk.PhotoImage(file=str(RESOURCE_DIR / "assets" / "gui" / "autopilot-hero.png"))
+            self.hero_image = original.subsample(2, 2)
+            self.hero_art_item = self.hero_canvas.create_image(0, 0, image=self.hero_image, anchor="n")
+        except tk.TclError:
+            self.hero_image = None
+            self.hero_art_item = None
+        self.hero_canvas.create_rectangle(28, 28, 530, 160, fill="#0B1021", outline=COLORS["line"], width=1)
+        self.hero_canvas.create_text(52, 52, text="RIMWORLD AUTOPILOT", fill=COLORS["cyan"], font=("Segoe UI Black", 11), anchor="nw")
+        self.hero_canvas.create_text(52, 82, text=tr(self.language, "hero_title"), fill=COLORS["text"], font=("Segoe UI Semibold", 21), anchor="nw")
+        self.hero_canvas.create_text(52, 121, text=tr(self.language, "hero_subtitle"), fill=COLORS["muted"], font=FONTS["body"], anchor="nw")
+        self.hero_canvas.bind("<Configure>", self._position_hero)
+
         hero = ShadowCard(page, padx=22, pady=18)
         hero.pack(fill="x", pady=(0, 14))
         left = tk.Frame(hero.body, bg=COLORS["panel"])
@@ -158,10 +183,10 @@ class ControlCenter(tk.Tk):
 
         controls = tk.Frame(hero.body, bg=COLORS["panel"])
         controls.pack(side="right", padx=(20, 0))
-        ttk.Button(controls, text=tr(self.language, "start"), style="Accent.TButton", command=self.start_laya).grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 7))
-        ttk.Button(controls, text=tr(self.language, "stop"), style="Danger.TButton", command=self.stop_laya).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 7))
-        ttk.Button(controls, text=tr(self.language, "pause"), style="Soft.TButton", command=lambda: self.set_speed(0)).grid(row=2, column=0, padx=(0, 4))
-        ttk.Button(controls, text=tr(self.language, "resume"), style="Soft.TButton", command=lambda: self.set_speed(1)).grid(row=2, column=1, padx=(4, 0))
+        FancyButton(controls, text=tr(self.language, "start"), width=216, variant="accent", icon="▶", command=self.start_laya).grid(row=0, column=0, columnspan=2, pady=(0, 7))
+        FancyButton(controls, text=tr(self.language, "stop"), width=216, variant="danger", icon="■", command=self.stop_laya).grid(row=1, column=0, columnspan=2, pady=(0, 7))
+        FancyButton(controls, text=tr(self.language, "pause"), width=104, variant="soft", command=lambda: self.set_speed(0)).grid(row=2, column=0, padx=(0, 4))
+        FancyButton(controls, text=tr(self.language, "resume"), width=104, variant="soft", command=lambda: self.set_speed(1)).grid(row=2, column=1, padx=(4, 0))
 
         row = tk.Frame(page, bg=COLORS["window"])
         row.pack(fill="both", expand=True)
@@ -270,8 +295,8 @@ class ControlCenter(tk.Tk):
         tk.Label(language.body, text=tr(self.language, "language"), bg=COLORS["panel"], fg=COLORS["cyan"], font=FONTS["heading"]).pack(anchor="w", pady=(0, 10))
         buttons = tk.Frame(language.body, bg=COLORS["panel"])
         buttons.pack(anchor="w")
-        ttk.Button(buttons, text="Русский", style="Accent.TButton" if self.language == "ru" else "Soft.TButton", command=lambda: self.set_language("ru")).pack(side="left", padx=(0, 7))
-        ttk.Button(buttons, text="English", style="Accent.TButton" if self.language == "en" else "Soft.TButton", command=lambda: self.set_language("en")).pack(side="left")
+        FancyButton(buttons, text="🇷🇺  Русский", width=146, variant="accent" if self.language == "ru" else "soft", command=lambda: self.set_language("ru")).pack(side="left", padx=(0, 7))
+        FancyButton(buttons, text="🇬🇧  English", width=146, variant="accent" if self.language == "en" else "soft", command=lambda: self.set_language("en")).pack(side="left")
 
         logging = ShadowCard(row)
         logging.pack(side="left", fill="both", expand=True, padx=(7, 0))
@@ -299,7 +324,7 @@ class ControlCenter(tk.Tk):
         self.pages[name].pack(fill="both", expand=True)
         for key, button in self.nav_buttons.items():
             active = key == name
-            button.configure(bg=COLORS["panel_alt"] if active else COLORS["sidebar"], fg=COLORS["cyan"] if active else COLORS["muted"])
+            button.configure(variant="soft" if active else "ghost")
         self.page_title.configure(text=tr(self.language, name))
         self.page_subtitle.configure(text=tr(self.language, f"{name}_sub"))
 
@@ -379,7 +404,7 @@ class ControlCenter(tk.Tk):
             messagebox.showerror(APP_NAME, f"{tr(self.language, 'error')}: {exc}")
 
     def export_history(self) -> None:
-        target = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV", "*.csv"), ("JSON Lines", "*.jsonl")], initialfile=timestamped_export_name("laya-history", "csv"))
+        target = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV", "*.csv"), ("JSON Lines", "*.jsonl")], initialfile=timestamped_export_name("autopilot-history", "csv"))
         if not target:
             return
         try:
@@ -389,7 +414,7 @@ class ControlCenter(tk.Tk):
             messagebox.showerror(APP_NAME, str(exc))
 
     def export_bundle(self) -> None:
-        target = filedialog.asksaveasfilename(defaultextension=".zip", filetypes=[("ZIP", "*.zip")], initialfile=timestamped_export_name("laya-export", "zip"))
+        target = filedialog.asksaveasfilename(defaultextension=".zip", filetypes=[("ZIP", "*.zip")], initialfile=timestamped_export_name("autopilot-export", "zip"))
         if not target:
             return
         try:
@@ -399,15 +424,15 @@ class ControlCenter(tk.Tk):
             messagebox.showerror(APP_NAME, str(exc))
 
     def open_installer(self) -> None:
-        executable = BASE_DIR / "Laya-Setup.exe"
-        script = BASE_DIR / "laya_setup.py"
+        executable = BASE_DIR / "RimWorld-Autopilot-Setup.exe"
+        script = BASE_DIR / "autopilot_setup.py"
         try:
             if executable.exists():
                 subprocess.Popen([str(executable)], cwd=BASE_DIR)
             elif script.exists():
                 subprocess.Popen([sys.executable, str(script)], cwd=BASE_DIR)
             else:
-                raise FileNotFoundError("Laya-Setup.exe")
+                raise FileNotFoundError("RimWorld-Autopilot-Setup.exe")
         except OSError as exc:
             messagebox.showerror(APP_NAME, f"{tr(self.language, 'error')}: {exc}")
 
@@ -582,7 +607,20 @@ class ControlCenter(tk.Tk):
         if getattr(self, "mascot_item", None) and self.mascot_canvas.winfo_exists():
             y = 74 + math.sin(self.animation_tick / 9.0) * 3
             self.mascot_canvas.coords(self.mascot_item, 113, y)
+            for index, item in enumerate(getattr(self, "orbit_items", [])):
+                angle = self.animation_tick / 20.0 + index * math.tau / 3
+                x = 112 + math.cos(angle) * 73
+                particle_y = 74 + math.sin(angle) * 56
+                self.mascot_canvas.coords(item, x - 3, particle_y - 3, x + 3, particle_y + 3)
+        if getattr(self, "hero_art_item", None) and self.hero_canvas.winfo_exists():
+            width = self.hero_canvas.winfo_width()
+            self.hero_canvas.coords(self.hero_art_item, width / 2 + math.sin(self.animation_tick / 18.0) * 5, -107)
         self.after(70, self._animate_mascot)
+
+    def _position_hero(self, event: tk.Event) -> None:
+        if getattr(self, "hero_art_item", None):
+            drift = math.sin(self.animation_tick / 18.0) * 5
+            self.hero_canvas.coords(self.hero_art_item, event.width / 2 + drift, -107)
 
 
 def run() -> None:

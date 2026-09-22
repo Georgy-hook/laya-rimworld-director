@@ -1,6 +1,6 @@
 # GUI architecture
 
-The 0.0.2 control center is intentionally separate from the colony controller. `laya_control.py` is a stable launcher; the implementation lives in `laya_gui/`:
+The 0.0.2 RimWorld Autopilot control center is intentionally separate from the colony controller. `autopilot_control.py` is the public launcher (`laya_control.py` remains compatible); the implementation lives in `laya_gui/`:
 
 - `app.py` composes the five user pages and animated navigation shell;
 - `theme.py` owns the dark cartoon palette, typography, shadows and reusable cards;
@@ -17,11 +17,11 @@ The 0.0.2 control center is intentionally separate from the colony controller. `
 4. **History** — friendly explanations by default; exact JSON is available only after enabling technical mode.
 5. **Settings** — Russian/English switch, diagnostic logging, installer and exports.
 
-The interface uses native Tk widgets and the standard library. It therefore adds no UI framework dependency to the already large local-model installation. The animated mascot is a project-local original PNG generated with the built-in ImageGen tool.
+The interface uses native Tk widgets and the standard library. It therefore adds no UI framework dependency to the already large local-model installation. Rounded cards, animated buttons and orbit particles are drawn locally. The emblem, panoramic colony art, setup illustration and five navigation illustrations are original project-local PNGs generated with the built-in ImageGen tool; prompts are preserved in `assets/gui/README.md`.
 
 ## Preference contract
 
-The GUI writes `laya-preferences.json`. The file is local runtime state and is excluded from Git. The development planner, combat planner, incident director, downed-raider policy and Ancient Danger decisions read the same validated structure.
+The GUI writes `autopilot-preferences.json`. Installed builds keep writable settings and logs in `%LOCALAPPDATA%\RimWorld Autopilot`, while program files remain under Program Files. The file is local runtime state and is excluded from Git. An existing `laya-preferences.json` is read as a compatibility migration. The development planner, combat planner, incident director, downed-raider policy and Ancient Danger decisions read the same validated structure.
 
 Weights guide ordering and model context. They cannot override emergency gates, missing research/resources, invalid targets or API safety checks. “Do not begin unprovoked attacks” additionally removes settlement raids from the feasible candidate set.
 
@@ -29,14 +29,16 @@ Normal logging keeps compact decisions, outcomes and probability paths. Technica
 
 ## Installer
 
-`Laya-Setup.exe` is built from `laya_setup.py` and `laya_gui/setup_app.py`. It:
+`RimWorld-Autopilot-Setup.exe` is built from `autopilot_setup.py` and `laya_gui/setup_app.py`. It requests administrator rights because its default target is `C:\Program Files\RimWorld Autopilot`. It:
 
-1. validates a real RimWorld folder;
-2. locates Python 3.10–3.12 or opens the official download page;
-3. creates `.venv` and installs `requirements.txt`;
-4. backs up an existing `Mods/RIMAPI` directory with a timestamp;
-5. copies the bundled modified RIMAPI source/build;
-6. writes the local control configuration.
+1. lets the player choose an application folder and a real RimWorld folder;
+2. offers an optional desktop shortcut, enabled by default;
+3. locates Python 3.10–3.12 or opens the official download page;
+4. copies the application, bilingual UI and complete local artwork set;
+5. creates `.venv` and installs `requirements.txt`;
+6. backs up an existing `Mods/RIMAPI` directory with a timestamp;
+7. copies the bundled modified RIMAPI source/build;
+8. writes `rimworld-autopilot.json` and creates the shortcut when selected.
 
 The installer does not request an API key, start RimWorld, alter saves or enable mods without the player.
 

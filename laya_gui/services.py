@@ -15,11 +15,14 @@ from typing import Any
 from urllib.request import Request, urlopen
 
 
-APP_NAME = "Laya Control Center 0.0.2"
+APP_NAME = "RimWorld Autopilot 0.0.2"
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1]
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", BASE_DIR))
-CONFIG_PATH = BASE_DIR / "laya-control.json"
-PREFERENCES_PATH = BASE_DIR / "laya-preferences.json"
+DATA_DIR = (Path(os.environ.get("LOCALAPPDATA", str(BASE_DIR))) / "RimWorld Autopilot") if getattr(sys, "frozen", False) else BASE_DIR
+CONFIG_PATH = DATA_DIR / "rimworld-autopilot.json"
+PACKAGED_CONFIG_PATH = BASE_DIR / "rimworld-autopilot.json"
+LEGACY_CONFIG_PATH = BASE_DIR / "laya-control.json"
+PREFERENCES_PATH = DATA_DIR / "autopilot-preferences.json"
 DEFAULT_CONFIG = {
     "python_exe": str(BASE_DIR / ".venv" / "Scripts" / "python.exe"),
     "director_script": str(BASE_DIR / "colony_director.py"),
@@ -32,7 +35,8 @@ DEFAULT_CONFIG = {
 def load_config() -> dict[str, Any]:
     config = dict(DEFAULT_CONFIG)
     try:
-        loaded = json.loads(CONFIG_PATH.read_text(encoding="utf-8-sig"))
+        source = next((path for path in (CONFIG_PATH, PACKAGED_CONFIG_PATH, LEGACY_CONFIG_PATH) if path.exists()), CONFIG_PATH)
+        loaded = json.loads(source.read_text(encoding="utf-8-sig"))
         if isinstance(loaded, dict):
             config.update(loaded)
     except (OSError, json.JSONDecodeError):
@@ -118,8 +122,10 @@ def start_director(config: dict[str, Any], log_path: Path, state_path: Path, pid
         "--interval", str(config.get("interval", 10)), "--api-url", str(config.get("api_url", "http://localhost:8765")),
         "--log", str(log_path), "--state", str(state_path), "--pid-file", str(pid_path),
     ]
+    environment = os.environ.copy()
+    environment["RIMWORLD_AUTOPILOT_PREFERENCES"] = str(PREFERENCES_PATH)
     try:
-        process = subprocess.Popen(args, cwd=BASE_DIR, stdout=stdout, stderr=stderr, creationflags=flags)
+        process = subprocess.Popen(args, cwd=BASE_DIR, stdout=stdout, stderr=stderr, creationflags=flags, env=environment)
         pid_path.write_text(str(process.pid), encoding="ascii")
         return process.pid
     finally:

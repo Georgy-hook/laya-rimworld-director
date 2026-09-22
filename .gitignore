@@ -5,6 +5,8 @@ logs/
 *.failed-*
 laya-control.json
 laya-preferences.json
+rimworld-autopilot.json
+autopilot-preferences.json
 
 # Python
 .venv/
@@ -19,6 +21,8 @@ dist/
 *.spec
 Laya-Control-Center.exe
 Laya-Setup.exe
+RimWorld-Autopilot.exe
+RimWorld-Autopilot-Setup.exe
 vendor/RIMAPI/Source/**/bin/
 vendor/RIMAPI/Source/**/obj/
 vendor/RIMAPI/1.6/Assemblies/*.pdb

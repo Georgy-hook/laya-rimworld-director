@@ -25,6 +25,13 @@ class PreferenceTests(unittest.TestCase):
             self.assertEqual(loaded["priorities"]["research"], 0)
             self.assertTrue(loaded["safety"]["avoid_unprovoked_attacks"])
 
+    def test_autopilot_preferences_use_product_name(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertEqual(
+                laya_preferences.preferences_path(Path(folder)).name,
+                "autopilot-preferences.json",
+            )
+
     def test_peace_boundary_removes_unprovoked_raid_candidates(self):
         preferences = laya_preferences.load_preferences_from_value({
             "safety": {"avoid_unprovoked_attacks": True},

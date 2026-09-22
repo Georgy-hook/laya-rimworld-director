@@ -7,9 +7,11 @@ import colony_strategy as strategy
 
 TEXT = {
     "ru": {
-        "app": "Laya — центр управления",
+        "app": "RimWorld Autopilot",
         "overview": "Обзор", "strategy": "Стратегия", "priorities": "Приоритеты", "history": "История", "settings": "Настройки",
         "overview_sub": "Понятная картина того, что происходит с колонией прямо сейчас.",
+        "hero_title": "Колония в надёжных руках",
+        "hero_subtitle": "Laya наблюдает, выбирает курс и действует локально.",
         "strategy_sub": "Курс развития, выбранный Laya, и доступные альтернативы.",
         "priorities_sub": "Ваши пожелания влияют на выбор модели, но не отменяют безопасность и реальные ограничения игры.",
         "history_sub": "Почему Laya сделала выбор — без технического шума.",
@@ -24,7 +26,7 @@ TEXT = {
         "safety": "Границы решений", "avoid_attacks": "Не начинать неспровоцированные нападения", "peaceful_trade": "Предпочитать мирную торговлю", "protect_food": "Не тратить аварийный запас еды",
         "technical_logging": "Технический режим журнала", "technical_help": "Добавляет полный снимок состояния для диагностики. Файлы становятся значительно больше.",
         "friendly_mode": "Понятный режим", "technical_mode": "Технический режим", "details": "Объяснение решения",
-        "language": "Язык интерфейса", "installer": "Установка", "run_installer": "Открыть помощник установки", "open_folder": "Открыть папку", "export_history": "Экспортировать историю", "export_bundle": "Экспортировать Laya",
+        "language": "Язык интерфейса", "installer": "Установка", "run_installer": "Открыть помощник установки", "open_folder": "Открыть папку", "export_history": "Экспортировать историю", "export_bundle": "Экспортировать Autopilot",
         "install_help": "Помощник создаст отдельное окружение Python, установит пакеты и подключит мод к RimWorld.",
         "ready": "Готово", "running": "работает", "stopped": "остановлена", "check": "проверка…",
         "decision_intro": "Laya рассмотрела {count} вариантов и выбрала: {choice}.", "confidence": "Уверенность", "result": "Результат", "why": "Последовательность выбора",
@@ -32,9 +34,11 @@ TEXT = {
         "done": "Выполнено", "not_applied": "Пока не выполнено: игровые условия ещё не готовы.", "error": "Произошла ошибка. Подробности доступны в техническом режиме.", "none": "Нет данных",
     },
     "en": {
-        "app": "Laya Control Center",
+        "app": "RimWorld Autopilot",
         "overview": "Overview", "strategy": "Strategy", "priorities": "Priorities", "history": "History", "settings": "Settings",
         "overview_sub": "A clear view of what is happening in the colony right now.",
+        "hero_title": "Your colony, thoughtfully guided",
+        "hero_subtitle": "Laya watches, chooses a course and acts locally.",
         "strategy_sub": "Laya's chosen development course and the alternatives currently available.",
         "priorities_sub": "Your preferences guide the model without bypassing safety or real game constraints.",
         "history_sub": "Why Laya made each choice, without technical noise.",
@@ -49,7 +53,7 @@ TEXT = {
         "safety": "Decision boundaries", "avoid_attacks": "Do not begin unprovoked attacks", "peaceful_trade": "Prefer peaceful trade", "protect_food": "Protect the emergency food reserve",
         "technical_logging": "Technical logging", "technical_help": "Adds a full state snapshot for diagnostics. Log files become much larger.",
         "friendly_mode": "Friendly view", "technical_mode": "Technical view", "details": "Decision explanation",
-        "language": "Interface language", "installer": "Installation", "run_installer": "Open setup assistant", "open_folder": "Open folder", "export_history": "Export history", "export_bundle": "Export Laya",
+        "language": "Interface language", "installer": "Installation", "run_installer": "Open setup assistant", "open_folder": "Open folder", "export_history": "Export history", "export_bundle": "Export Autopilot",
         "install_help": "The assistant creates an isolated Python environment, installs packages and connects the mod to RimWorld.",
         "ready": "Ready", "running": "running", "stopped": "stopped", "check": "checking…",
         "decision_intro": "Laya considered {count} options and chose: {choice}.", "confidence": "Confidence", "result": "Result", "why": "Decision path",
