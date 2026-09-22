@@ -4185,17 +4185,39 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
-def write_runtime_status(path: Path, state: str, detail: str = "") -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def write_runtime_status(path: Path, state: str, detail: str = "") -> bool:
+    """Publish health without ever letting a Windows file-sharing race stop Laya."""
     payload = {
         "pid": os.getpid(),
         "state": state,
         "detail": detail[:500],
         "updated_at": bridge.utc_now(),
     }
+    serialized = json.dumps(payload, ensure_ascii=False)
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    temporary.replace(path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return False
+    for attempt in range(4):
+        try:
+            temporary.write_text(serialized, encoding="utf-8")
+            temporary.replace(path)
+            return True
+        except OSError:
+            time.sleep(0.025 * (attempt + 1))
+    # Antivirus and the GUI can briefly hold the destination without FILE_SHARE_DELETE.
+    # A direct write is less atomic but still preferable to terminating the autopilot.
+    try:
+        path.write_text(serialized, encoding="utf-8")
+        return True
+    except OSError:
+        return False
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def classify_runtime_problem(detail: str) -> tuple[str, str, str]:

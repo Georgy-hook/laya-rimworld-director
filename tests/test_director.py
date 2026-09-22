@@ -1,7 +1,9 @@
 import importlib.util
 import pathlib
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 import colony_combat
 import colony_events
@@ -154,6 +156,14 @@ class DirectorTests(unittest.TestCase):
         self.assertEqual((delay, count), (300.0, 6))
         delay, count = director.cycle_retry_policy("waiting", 5, 10.0)
         self.assertEqual((delay, count), (10.0, 0))
+
+    def test_locked_heartbeat_replace_falls_back_without_crashing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = pathlib.Path(folder) / "runtime-status.json"
+            with mock.patch.object(pathlib.Path, "replace", side_effect=PermissionError("locked")):
+                written = director.write_runtime_status(target, "running", "healthy")
+            self.assertTrue(written)
+            self.assertIn('"state": "running"', target.read_text(encoding="utf-8"))
 
     def test_decodes_rle_terrain(self):
         width, height, cells = director.decode_terrain({
