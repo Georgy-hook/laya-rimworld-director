@@ -115,10 +115,20 @@ class DirectorTests(unittest.TestCase):
             "current_job": "GotoWander",
         }))
         self.assertTrue(director.animal_needs_assisted_feeding({
+            "hunger": 0.0,
+            "downed": True,
+            "current_job": "LayDown",
+        }))
+        self.assertTrue(director.animal_needs_assisted_feeding({
             "hunger": 0.2,
             "downed": True,
             "current_job": "LayDown",
         }))
+
+    def test_only_downed_hungry_colonist_is_force_fed(self):
+        self.assertFalse(director.colonist_needs_assisted_feeding({"hunger": 0.0, "downed": False}))
+        self.assertTrue(director.colonist_needs_assisted_feeding({"hunger": 0.0, "downed": True}))
+        self.assertFalse(director.colonist_needs_assisted_feeding({"hunger": 0.8, "downed": True}))
 
     def test_failed_action_uses_bounded_exponential_backoff(self):
         state = {}
@@ -164,6 +174,44 @@ class DirectorTests(unittest.TestCase):
                 written = director.write_runtime_status(target, "running", "healthy")
             self.assertTrue(written)
             self.assertIn('"state": "running"', target.read_text(encoding="utf-8"))
+
+    def test_loading_older_save_discards_orders_from_future_ticks(self):
+        state = {"issued": {"priority:Hunting": 5000, "growing": 6000, "old": 50}}
+        removed = director.reconcile_issued_timeline(state, 1000)
+        self.assertEqual(set(removed), {"priority:Hunting", "growing"})
+        self.assertEqual(state["issued"], {"old": 50})
+        state["issued"]["future"] = 2000
+        self.assertFalse(director.issued_recently(state, "future", 1000))
+        self.assertNotIn("future", state["issued"])
+
+    def test_starving_colony_offers_food_actions_before_waiting(self):
+        snapshot = {
+            "game": {"tick": 1000},
+            "map": {"resources": {"food": 0, "raw_food": 0, "meals": 0}},
+            "colonists": [{"id": 1, "hunger": 0.05, "position": {"x": 10, "z": 10}}],
+            "animals": [],
+            "wild_animals": [{
+                "id": 9, "def": "Hare", "predator": False, "harm_revenge_chance": 0,
+                "combat_power": 33, "meat_amount": 31, "position": {"x": 20, "z": 20},
+            }],
+            "combat": {"colonists": [{
+                "id": 1, "has_ranged_weapon": True, "is_downed": False,
+                "health": 1.0, "shooting_skill": 8,
+            }]},
+            "development": {
+                "building_counts": {}, "zones": [], "finished_research": [], "current_research": {},
+                "item_counts": {}, "forbidden": [], "corpses": [], "plants": [{
+                    "thing_id": 7, "def_name": "Plant_Berry", "label": "berry bush",
+                    "harvestable_now": True, "harvest_yield": 10, "harvested_thing_def": "RawBerries",
+                    "position": {"x": 30, "z": 20},
+                }],
+            },
+        }
+        candidates, details = director.candidate_actions(None, snapshot, {"anchor": {"x": 10, "z": 10}, "issued": {}})
+        self.assertIn("harvest_local_plants", candidates)
+        self.assertIn("designate_safe_hunting", candidates)
+        self.assertNotIn("hold_survival", candidates)
+        self.assertTrue(details["food_emergency_context"]["safe_hunt_targets"])
 
     def test_decodes_rle_terrain(self):
         width, height, cells = director.decode_terrain({

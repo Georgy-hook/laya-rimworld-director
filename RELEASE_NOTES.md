@@ -17,6 +17,8 @@ Highlights:
 - assisted animal feeding is offered only to downed or resting patients; a stale impossible feed order is skipped instead of trapping the director in an error loop;
 - every rejected colony or event action enters a persisted 30-300 second bounded backoff and is removed from Laya's choices during that period so another valid response can be selected; unexpected combat and system cycle errors use the same bounded retry policy instead of hammering RIMAPI every two seconds;
 - Windows heartbeat publication tolerates transient GUI/antivirus file locks and can no longer terminate the director merely because the status file was being read;
+- loading an older save discards future-timeline order markers, and zero-food/critical-hunger colonies immediately offer reachable wild-food harvests, safe hunts and the matching work priorities instead of idling behind stale issued-work flags;
+- once food becomes available, a downed starving colonist receives a normal patient-feeding job while mobile colonists remain free to eat by themselves;
 - a central decision guard that resolves a sole feasible action without calling Laya, guaranteeing that the model only receives choices with at least two real alternatives;
 - standard dark/light Windows installer with custom portrait art, Program Files destination, optional desktop shortcut, temporary configuration assistant, registered Installed-apps entry and normal uninstaller;
 - audited doctrine v2 with 30 strategic archetypes covering Core, Royalty, Ideology, Biotech, Anomaly and Odyssey;

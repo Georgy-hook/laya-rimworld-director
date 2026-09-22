@@ -46,6 +46,7 @@ ACTION_DESCRIPTIONS = {
     "build_animal_spots": "Place free animal sleeping spots so injured colony animals can rest and receive treatment.",
     "care_for_injured_animal": "Send the best available doctor to the most seriously injured colony animal and assign animal bed rest.",
     "feed_hungry_animal": "Immediately feed the hungriest resting colony animal before starvation becomes critical.",
+    "feed_hungry_colonist": "Immediately feed the hungriest downed colonist who cannot walk to available food.",
     "build_cemetery": "Create a real graveyard outside the living and food areas so human corpses can be buried normally.",
     "create_human_corpse_dump": "Create a critical-priority human-corpse dumping stockpile far outside colonist sight; this is faster than digging many graves.",
     "create_animal_corpse_dump": "Create a critical-priority animal-corpse stockpile beside the butcher area so carcasses are hauled and processed efficiently.",
@@ -137,6 +138,7 @@ ACTION_LABELS = {
     "build_animal_spots": "лежанки животных",
     "care_for_injured_animal": "лечение животного",
     "feed_hungry_animal": "кормление животного",
+    "feed_hungry_colonist": "кормление лежачего колониста",
     "build_cemetery": "кладбище",
     "create_human_corpse_dump": "дальняя свалка человеческих трупов",
     "create_animal_corpse_dump": "свалка туш у разделки",
@@ -889,7 +891,34 @@ def collect_development(client: bridge.RimApiClient, snapshot: dict[str, Any]) -
 def issued_recently(map_state: dict[str, Any], name: str, tick: int, retry_ticks: int = 60000) -> bool:
     issued = map_state.setdefault("issued", {})
     value = issued.get(name)
-    return value is not None and tick - int(value) < retry_ticks
+    if value is None:
+        return False
+    try:
+        age = tick - int(value)
+    except (TypeError, ValueError):
+        issued.pop(name, None)
+        return False
+    if age < 0:
+        # Loading an older save must not leave orders from the abandoned future
+        # permanently suppressing food, construction, hauling or medical work.
+        issued.pop(name, None)
+        return False
+    return age < retry_ticks
+
+
+def reconcile_issued_timeline(map_state: dict[str, Any], tick: int) -> list[str]:
+    """Discard future issue markers after a save rollback and report what changed."""
+    issued = map_state.setdefault("issued", {})
+    removed: list[str] = []
+    for name, value in list(issued.items()):
+        try:
+            invalid = int(value) > tick
+        except (TypeError, ValueError):
+            invalid = True
+        if invalid:
+            removed.append(str(name))
+            issued.pop(name, None)
+    return removed
 
 
 def relevant_forbidden(snapshot: dict[str, Any], radius: int = 40) -> list[dict[str, Any]]:
@@ -933,7 +962,12 @@ def animal_needs_assisted_feeding(animal: dict[str, Any]) -> bool:
     is_patient = bool(animal.get("downed")) or any(
         marker in current_job for marker in ("laydown", "patient", "bedrest")
     )
-    return is_patient and float(animal.get("hunger") or 1.0) < 0.35
+    return is_patient and bridge.first_number(animal.get("hunger"), 1.0) < 0.35
+
+
+def colonist_needs_assisted_feeding(colonist: dict[str, Any]) -> bool:
+    """A conscious mobile colonist should reserve the normal self-feeding job."""
+    return bool(colonist.get("downed") or colonist.get("is_downed")) and bridge.first_number(colonist.get("hunger"), 1.0) < 0.35
 
 
 def action_backoff_remaining(map_state: dict[str, Any], choice: str, now: float | None = None) -> float:
@@ -1119,17 +1153,116 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
     details: dict[str, Any] = {}
     one_time: list[str] = []
     item_counts = dev.get("item_counts", {})
+    rolled_back_orders = reconcile_issued_timeline(map_state, tick)
+    if rolled_back_orders:
+        details["discarded_future_orders"] = rolled_back_orders
 
     if relevant_forbidden(snapshot) and not issued_recently(
         map_state, "unforbid_supplies", tick, retry_ticks=60000
     ):
         return ["unforbid_supplies"], details
 
+    issued = map_state.setdefault("issued", {})
+    resources = snapshot["map"]["resources"]
+    lowest_food = min((float(c.get("hunger") or 0.0) for c in snapshot["colonists"]), default=1.0)
+    hungry_colonist_patients = sorted(
+        (colonist for colonist in snapshot["colonists"] if colonist_needs_assisted_feeding(colonist)),
+        key=lambda colonist: bridge.first_number(colonist.get("hunger"), 1.0),
+    )
+    if int(resources.get("food") or 0) > 0 and hungry_colonist_patients:
+        patient = hungry_colonist_patients[0]
+        patient_id = int(patient["id"])
+        if not issued_recently(map_state, f"colonist_feed:{patient_id}", tick, retry_ticks=1200):
+            details["hungry_colonist_id"] = patient_id
+            details["hungry_colonist_name"] = str(patient.get("name") or patient_id)
+            return ["feed_hungry_colonist"], details
+    food_emergency = int(resources.get("food") or 0) <= 0 or lowest_food < 0.12
+    if food_emergency:
+        anchor = map_state.get("anchor") or {"x": 125, "z": 125}
+        radius_squared = 180 ** 2
+        wild_food_groups: dict[str, dict[str, Any]] = {}
+        food_tokens = ("berry", "agave", "fruit", "ambrosia", "cocoa", "raw")
+        for plant in dev.get("plants", []):
+            harvested = str(plant.get("harvested_thing_def") or "")
+            if not plant.get("harvestable_now") or not any(token in harvested.lower() for token in food_tokens):
+                continue
+            pos = plant.get("position") or {}
+            if (int(pos.get("x") or 0) - int(anchor["x"])) ** 2 + (int(pos.get("z") or 0) - int(anchor["z"])) ** 2 > radius_squared:
+                continue
+            name = str(plant.get("def_name") or harvested)
+            group = wild_food_groups.setdefault(name, {
+                "label": str(plant.get("label") or name),
+                "harvested_thing": harvested,
+                "count": 0,
+                "expected_yield": 0,
+                "ids": [],
+            })
+            group["count"] += 1
+            group["expected_yield"] += int(plant.get("harvest_yield") or 0)
+            group["ids"].append(int(plant["thing_id"]))
+
+        combat_rows = snapshot.get("combat", {}).get("colonists", [])
+        healthy_armed = [
+            row for row in combat_rows
+            if row.get("has_ranged_weapon") and not row.get("is_downed") and float(row.get("health") or 0.0) >= 0.65
+        ]
+        emergency_hunt_options = []
+        if healthy_armed:
+            for animal in snapshot.get("wild_animals", []):
+                pos = animal.get("position") or {}
+                close = (int(pos.get("x") or 0) - int(anchor["x"])) ** 2 + (int(pos.get("z") or 0) - int(anchor["z"])) ** 2 <= radius_squared
+                safe = (
+                    close
+                    and not animal.get("predator")
+                    and "boom" not in str(animal.get("def") or "").lower()
+                    and float(animal.get("harm_revenge_chance") or 0.0) <= 0.05
+                    and float(animal.get("combat_power") or 0.0) <= 100
+                    and not issued_recently(map_state, f"hunt:{animal.get('id')}", tick, retry_ticks=60000)
+                )
+                if safe:
+                    emergency_hunt_options.append(animal)
+        emergency_hunt_options.sort(
+            key=lambda animal: (int(animal.get("meat_amount") or 0), -float(animal.get("combat_power") or 0.0)),
+            reverse=True,
+        )
+
+        emergency_actions: list[str] = []
+        if wild_food_groups and not issued_recently(map_state, "harvest", tick, retry_ticks=2500):
+            details["wild_plant_options"] = wild_food_groups
+            dev["wild_plant_options"] = wild_food_groups
+            emergency_actions.append("harvest_local_plants")
+        if emergency_hunt_options:
+            details["hunt_options"] = emergency_hunt_options[:20]
+            details["fighter_context"] = {
+                "healthy_ranged": len(healthy_armed),
+                "average_shooting": round(sum(int(row.get("shooting_skill") or 0) for row in healthy_armed) / len(healthy_armed), 1),
+                "food_emergency": True,
+            }
+            dev["hunt_options"] = emergency_hunt_options[:20]
+            dev["fighter_context"] = details["fighter_context"]
+            emergency_actions.append("designate_safe_hunting")
+        if wild_food_groups and not issued_recently(map_state, "priority:PlantCutting", tick, retry_ticks=15000):
+            emergency_actions.append("prioritize_plant_cutting")
+        if emergency_hunt_options and not issued_recently(map_state, "priority:Hunting", tick, retry_ticks=15000):
+            emergency_actions.append("prioritize_hunting")
+        if int(resources.get("raw_food") or 0) > 0 and not issued_recently(map_state, "priority:Cooking", tick, retry_ticks=15000):
+            emergency_actions.append("prioritize_cooking")
+        details["food_emergency_context"] = {
+            "food": int(resources.get("food") or 0),
+            "raw_food": int(resources.get("raw_food") or 0),
+            "meals": int(resources.get("meals") or 0),
+            "lowest_hunger": round(lowest_food, 3),
+            "harvestable_food_types": list(wild_food_groups),
+            "safe_hunt_targets": len(emergency_hunt_options),
+        }
+        dev["food_emergency_context"] = details["food_emergency_context"]
+        if emergency_actions:
+            return list(dict.fromkeys(emergency_actions)), details
+
     human_corpses = corpse_rows(snapshot, "CorpsesHumanlike")
     all_corpses = corpse_rows(snapshot)
     if forbidden_corpses(snapshot) and not issued_recently(map_state, "unforbid_corpses", tick, retry_ticks=15000):
         return ["unforbid_corpses"], details
-    issued = map_state.setdefault("issued", {})
     human_dump_exists = any("Laya Human Corpse Dump" in str(z.get("label") or "") for z in zones)
     animal_dump_exists = any("Laya Animal Carcasses" in str(z.get("label") or "") for z in zones)
     corpse_actions: list[str] = []
@@ -1202,7 +1335,7 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
     )
     hungry_animals = sorted(
         (animal for animal in colony_animals if animal_needs_assisted_feeding(animal)),
-        key=lambda animal: float(animal.get("hunger") or 1.0),
+        key=lambda animal: bridge.first_number(animal.get("hunger"), 1.0),
     )
     animal_emergency: list[str] = []
     if colony_animals and counts.get("AnimalSleepingSpot", 0) < len(colony_animals) and "animal_spots" not in map_state["issued"]:
@@ -1240,8 +1373,6 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
     storage_utilization = int((dev.get("storage") or {}).get("utilization_percent") or 0)
     if storage_utilization >= 90 and not issued_recently(map_state, "expand_stockpile", tick, retry_ticks=120000):
         one_time.append("expand_stockpile")
-    resources = snapshot["map"]["resources"]
-    lowest_food = min((float(c.get("hunger") or 0.0) for c in snapshot["colonists"]), default=1.0)
     survival_stable = (
         int(resources.get("food") or 0) >= max(8, len(snapshot["colonists"]) * 3)
         and lowest_food >= 0.30
@@ -2016,7 +2147,7 @@ def action_domain(name: str) -> str:
     if name.startswith(("income_", "trade_to:", "raid_to:", "prisoner_policy:")): return "economy_diplomacy"
     if name.startswith(("prioritize_", "harvest_", "designate_", "start_", "breed_")) or name in {"develop_colonist_skill", "optimize_night_owl_schedule"}: return "work_orders"
     if name.startswith(("build_killbox", "build_fallback", "build_turret", "build_mortar", "build_firefoam", "process_mechanoids")): return "defense"
-    if name in {"care_for_injured_animal", "feed_hungry_animal", "build_hospital", "configure_hospital_beds", "build_prison"}: return "care"
+    if name in {"care_for_injured_animal", "feed_hungry_animal", "feed_hungry_colonist", "build_hospital", "configure_hospital_beds", "build_prison"}: return "care"
     if name in {"unforbid_corpses", "create_human_corpse_dump", "create_animal_corpse_dump", "build_cemetery", "build_crematorium"}: return "corpse_management"
     if name.startswith(("build_", "create_", "expand_", "floor_", "install_", "commission_", "excavate_", "finish_")) or name in {"plan_architecture", "improve_room_lighting", "upgrade_workbench"}: return "construction"
     return "strategy"
@@ -3075,6 +3206,30 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
         return {
             "applied": True,
             "animal": details.get("hungry_animal_name", animal_id),
+            "feeder": feeder.get("name") if feeder else "automatic",
+            "response": response,
+        }
+    if choice == "feed_hungry_colonist":
+        patient_id = int(details["hungry_colonist_id"])
+        feeder = bridge.choose_worker(snapshot["colonists"], "Doctor") or bridge.choose_worker(snapshot["colonists"], "BasicWorker")
+        body: dict[str, Any] = {"patient_pawn_id": patient_id}
+        if feeder is not None and int(feeder.get("id", -1)) != patient_id:
+            body["feeder_pawn_id"] = int(feeder["id"])
+        try:
+            response = client.post("/api/v1/pawn/medical/feed", body=body)
+        except bridge.RimApiError as exc:
+            issued[f"colonist_feed:{patient_id}"] = tick
+            return {
+                "applied": False,
+                "skipped": "patient_feeding_unavailable",
+                "colonist": details.get("hungry_colonist_name", patient_id),
+                "feeder": feeder.get("name") if feeder else "automatic",
+                "error": str(exc),
+            }
+        issued[f"colonist_feed:{patient_id}"] = tick
+        return {
+            "applied": True,
+            "colonist": details.get("hungry_colonist_name", patient_id),
             "feeder": feeder.get("name") if feeder else "automatic",
             "response": response,
         }
