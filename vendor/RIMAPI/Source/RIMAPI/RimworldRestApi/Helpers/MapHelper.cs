@@ -938,8 +938,11 @@ namespace RIMAPI.Helpers
                 }
 
                 // Set priority BEFORE registering
-                int priorityValue = request.Priority ?? 0; // Default to High (0)
-                priorityValue = Mathf.Clamp(priorityValue, -1, 2);
+                // RimWorld StoragePriority values span 0..5 (Unstored through
+                // Critical). Older RIMAPI builds truncated Important/Critical
+                // requests to Normal, so corpse/food zones never won hauling.
+                int priorityValue = request.Priority ?? 2;
+                priorityValue = Mathf.Clamp(priorityValue, 0, 5);
                 stockpile.settings.Priority = (StoragePriority)priorityValue;
 
                 // Configure storage settings (filtration)

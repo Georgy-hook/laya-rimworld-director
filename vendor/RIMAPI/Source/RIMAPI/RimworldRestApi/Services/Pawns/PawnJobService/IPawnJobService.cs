@@ -9,5 +9,6 @@ namespace RIMAPI.Services
         ApiResult AssignTendJob(MedicalTendRequestDto request);
         ApiResult AssignBedRest(MedicalBedRestRequestDto request);
         ApiResult AssignFeedJob(MedicalFeedRequestDto request);
+        ApiResult AddPrisonerOrganPlan(PrisonerOrganPlanRequestDto request);
     }
 }

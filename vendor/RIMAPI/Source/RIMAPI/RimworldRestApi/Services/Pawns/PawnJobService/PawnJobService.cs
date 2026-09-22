@@ -13,6 +13,32 @@ namespace RIMAPI.Services
     {
         public PawnJobService() { }
 
+        public ApiResult AddPrisonerOrganPlan(PrisonerOrganPlanRequestDto request)
+        {
+            try
+            {
+                Pawn prisoner = PawnHelper.FindPawnById(request.PrisonerPawnId);
+                if (prisoner == null || !prisoner.IsPrisonerOfColony || prisoner.Dead)
+                    return ApiResult.Fail("Selected pawn is not a living colony prisoner.");
+                string organ = (request.OrganDefName ?? "").Trim();
+                if (!new[] { "Kidney", "Lung", "Heart", "Liver" }.Contains(organ))
+                    return ApiResult.Fail("Organ must be Kidney, Lung, Heart, or Liver.");
+                if (!request.AllowLethal && (organ == "Heart" || organ == "Liver"))
+                    return ApiResult.Fail("Heart and liver removal require an explicit lethal plan.");
+                RecipeDef recipe = DefDatabase<RecipeDef>.GetNamedSilentFail("RemoveBodyPart");
+                BodyPartRecord part = recipe?.Worker?.GetPartsToApplyOn(prisoner, recipe)
+                    .FirstOrDefault(p => p.def?.defName == organ);
+                if (part == null || !recipe.AvailableOnNow(prisoner, part))
+                    return ApiResult.Fail($"No removable {organ} is available on this prisoner.");
+                HealthCardUtility.CreateSurgeryBill(prisoner, recipe, part, null, true);
+                return ApiResult.Ok();
+            }
+            catch (Exception ex)
+            {
+                return ApiResult.Fail(ex.Message);
+            }
+        }
+
         public ApiResult AssignJob(PawnJobRequestDto request)
         {
             try

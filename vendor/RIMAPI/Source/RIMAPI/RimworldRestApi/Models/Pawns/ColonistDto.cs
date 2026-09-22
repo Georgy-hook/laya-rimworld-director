@@ -64,6 +64,9 @@ namespace RIMAPI.Models
         // Capacities (0.0 to 1.0+)
         public float Consciousness { get; set; }
         public float Moving { get; set; }
+        public float Manipulation { get; set; }
+        public float Sight { get; set; }
+        public float Pain { get; set; }
 
         public float Health { get; set; }
         public List<HediffDto> Hediffs { get; set; }
@@ -281,6 +284,13 @@ namespace RIMAPI.Models
     {
         public int PrisonerPawnId { get; set; }
         public string Policy { get; set; }
+    }
+
+    public class PrisonerOrganPlanRequestDto
+    {
+        public int PrisonerPawnId { get; set; }
+        public string OrganDefName { get; set; }
+        public bool AllowLethal { get; set; }
     }
 
     public class BedConfigureRequestDto

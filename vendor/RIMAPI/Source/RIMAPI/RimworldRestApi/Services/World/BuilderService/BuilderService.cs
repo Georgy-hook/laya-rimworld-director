@@ -7,11 +7,87 @@ using RIMAPI.Models;
 using RimWorld;
 using UnityEngine;
 using Verse;
+using Verse.AI;
 
 namespace RIMAPI.Services
 {
     public class BuilderService : IBuilderService
     {
+        public ApiResult<ConstructionProjectsDto> GetConstructionProjects(int mapId)
+        {
+            try
+            {
+                var map = MapHelper.GetMapByID(mapId);
+                if (map == null) return ApiResult<ConstructionProjectsDto>.Fail($"Map {mapId} not found.");
+                var projects = map.listerThings.AllThings
+                    .Where(t => t is Blueprint || t is Frame)
+                    .Select(t =>
+                    {
+                        var target = t.def.entityDefToBuild;
+                        var frame = t as Frame;
+                        return new ConstructionProjectDto
+                        {
+                            ThingId = t.thingIDNumber,
+                            DefName = target?.defName,
+                            Label = target?.label ?? t.LabelCap,
+                            Kind = t is Frame ? "frame" : "blueprint",
+                            StuffDefName = t.Stuff?.defName,
+                            PercentComplete = frame?.PercentComplete ?? 0f,
+                            Position = new PositionDto { X = t.Position.x, Y = t.Position.y, Z = t.Position.z },
+                        };
+                    })
+                    .OrderBy(p => p.Kind == "frame" ? 0 : 1)
+                    .ThenByDescending(p => p.PercentComplete)
+                    .Take(100)
+                    .ToList();
+                return ApiResult<ConstructionProjectsDto>.Ok(new ConstructionProjectsDto { Projects = projects });
+            }
+            catch (Exception ex)
+            {
+                return ApiResult<ConstructionProjectsDto>.Fail(ex.Message);
+            }
+        }
+
+        public ApiResult PrioritizeConstruction(PrioritizeConstructionRequestDto request)
+        {
+            try
+            {
+                var map = MapHelper.GetMapByID(request.MapId);
+                if (map == null) return ApiResult.Fail($"Map {request.MapId} not found.");
+                var project = map.listerThings.AllThings.FirstOrDefault(t =>
+                    t.thingIDNumber == request.ProjectThingId && (t is Blueprint || t is Frame));
+                if (project == null) return ApiResult.Fail("Construction project not found.");
+                var pawn = map.mapPawns.FreeColonists.FirstOrDefault(p => p.thingIDNumber == request.PawnId);
+                if (pawn == null || pawn.Dead || pawn.Downed) return ApiResult.Fail("Selected builder is unavailable.");
+                if (pawn.WorkTypeIsDisabled(WorkTypeDefOf.Construction))
+                    return ApiResult.Fail("Selected pawn cannot do Construction.");
+
+                Job job = null;
+                if (project is Frame)
+                {
+                    var finish = DefDatabase<WorkGiverDef>.GetNamedSilentFail("ConstructFinishFrames")?.Worker as WorkGiver_Scanner;
+                    job = finish?.JobOnThing(pawn, project, true);
+                    if (job == null)
+                    {
+                        var deliver = DefDatabase<WorkGiverDef>.GetNamedSilentFail("ConstructDeliverResourcesToFrames")?.Worker as WorkGiver_Scanner;
+                        job = deliver?.JobOnThing(pawn, project, true);
+                    }
+                }
+                else
+                {
+                    var deliver = DefDatabase<WorkGiverDef>.GetNamedSilentFail("ConstructDeliverResourcesToBlueprints")?.Worker as WorkGiver_Scanner;
+                    job = deliver?.JobOnThing(pawn, project, true);
+                }
+                if (job == null) return ApiResult.Fail("The project is blocked, lacks reachable material, or exceeds the builder's skill.");
+                if (!pawn.jobs.TryTakeOrderedJob(job)) return ApiResult.Fail("Selected builder could not accept the construction job.");
+                return ApiResult.Ok();
+            }
+            catch (Exception ex)
+            {
+                return ApiResult.Fail(ex.Message);
+            }
+        }
+
         public ApiResult<BlueprintDto> CopyArea(CopyAreaRequestDto request)
         {
             try
@@ -257,13 +333,21 @@ namespace RIMAPI.Services
 
                     // Create Blueprint
                     // Note: GenConstruct handles checking if it can be placed, checking affordance, etc.
+                    Precept_ThingStyle styleSource = null;
+                    if (ModsConfig.IdeologyActive && Faction.OfPlayer?.ideos?.PrimaryIdeo != null)
+                    {
+                        styleSource = Faction.OfPlayer.ideos.PrimaryIdeo.PreceptsListForReading
+                            .OfType<Precept_ThingStyle>()
+                            .FirstOrDefault(precept => precept.ThingDef == thingDef);
+                    }
                     GenConstruct.PlaceBlueprintForBuild(
                         thingDef,
                         pos,
                         map,
                         rotation,
                         Faction.OfPlayer,
-                        stuffDef
+                        stuffDef,
+                        styleSource
                     );
                     count++;
                 }

@@ -163,6 +163,13 @@ namespace RIMAPI.Helpers
                     },
                     MedicalInfo = new MedicalInfoDto
                     {
+                        IsDead = pawn.Dead,
+                        IsDowned = pawn.Downed,
+                        Consciousness = pawn.health?.capacities?.GetLevel(PawnCapacityDefOf.Consciousness) ?? 0f,
+                        Moving = pawn.health?.capacities?.GetLevel(PawnCapacityDefOf.Moving) ?? 0f,
+                        Manipulation = pawn.health?.capacities?.GetLevel(PawnCapacityDefOf.Manipulation) ?? 0f,
+                        Sight = pawn.health?.capacities?.GetLevel(PawnCapacityDefOf.Sight) ?? 0f,
+                        Pain = pawn.health?.hediffSet?.PainTotal ?? 0f,
                         Health = pawn.health?.summaryHealth?.SummaryHealthPercent ?? 1f,
                         Hediffs = GetHediffs(pawn),
                         MedicalPolicyId = (int)(

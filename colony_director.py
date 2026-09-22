@@ -31,15 +31,21 @@ ACTION_DESCRIPTIONS = {
     "unforbid_supplies": "Remove the red forbidden marks from landed supplies so colonists can eat, equip and haul them.",
     "create_food_stockpile": "Create a high-priority food-only stockpile inside the planned freezer.",
     "build_sleeping_spots": "Place free sleeping spots first; these cannot waste scarce construction materials in botched attempts.",
+    "build_basic_beds": "Replace emergency sleeping spots with real beds once a capable builder and enough material are available.",
     "build_animal_spots": "Place free animal sleeping spots so injured colony animals can rest and receive treatment.",
     "care_for_injured_animal": "Send the best available doctor to the most seriously injured colony animal and assign animal bed rest.",
     "feed_hungry_animal": "Immediately feed the hungriest resting colony animal before starvation becomes critical.",
     "build_cemetery": "Create a real graveyard outside the living and food areas so human corpses can be buried normally.",
+    "create_human_corpse_dump": "Create a critical-priority human-corpse dumping stockpile far outside colonist sight; this is faster than digging many graves.",
+    "create_animal_corpse_dump": "Create a critical-priority animal-corpse stockpile beside the butcher area so carcasses are hauled and processed efficiently.",
+    "create_stone_chunk_dump": "Create a preferred stone-chunk dumping stockpile beside the stonecutter to remove long hauling trips.",
+    "build_crematorium": "Build an electric crematorium and configure corpse cremation when power, steel, components and labor justify it.",
     "build_prison": "Build a small enclosed two-bed prison so a downed hostile can be captured through the normal Capture job.",
     "build_hospital": "Build a small enclosed two-bed clinic and later mark its completed beds medical.",
     "configure_hospital_beds": "Mark the completed clinic beds as medical beds.",
     "floor_critical_room": "Floor a real kitchen, food room or hospital chosen by Laya with an affordable material, balancing cleanliness, fire, work and reserves.",
     "build_pathways": "Build an affordable two-wide path between the colony core, stores and fields to improve routine movement speed.",
+    "build_temple": "Build an Ideology-compatible ritual room around the colony's actual altar or ideogram precept, with no beds or work facilities.",
     "choose_colony_doctrine": "Choose or deliberately revise a persistent colony doctrine: settlement form/material, peaceful or aggressive posture, military investment, and production identity. Existing buildings are never replaced merely because the doctrine changes.",
     "build_private_bedroom": "Build one separate private bedroom in the current settlement material, improving sleep privacy and enabling an impressive-bedroom mood bonus without rebuilding existing rooms.",
     "excavate_mountain_bedroom": "Mine a compact bedroom into a verified solid natural-rock block, leaving natural rock walls and a one-cell entrance; furnish it only after excavation completes.",
@@ -74,6 +80,7 @@ ACTION_DESCRIPTIONS = {
     "income_brewing": "Adopt a beer route: grow hops, research brewing, make wort and ferment it into a durable trade product.",
     "income_travel_food": "Adopt a caravan-food route: make pemmican or packaged survival meals for sale and for longer trade expeditions.",
     "income_orbital": "Adopt an orbital trade route: research microelectronics and build a comms console plus beacon for passing ships.",
+    "income_organs": "Adopt a prisoner-organ trade route, balancing doctor skill, medicine, surgery risk, ideology and colony mood against organ value.",
     "build_income_infrastructure": "Build the missing workshop for the chosen income strategy after its prerequisite research is complete.",
     "build_killbox": "Build an early open-path defensive funnel with cover and spike traps; it is only the outer layer, not the whole defense.",
     "build_fallback_defense": "Build an internal fallback firing line and melee choke so breachers, drop pods and infestations do not bypass every defense.",
@@ -88,6 +95,7 @@ ACTION_DESCRIPTIONS = {
     "prepare_trade_caravan": "Prepare a guarded trade expedition to a friendly settlement, keeping enough defenders, food and medicine at home.",
     "configure_income_production": "Configure the chosen workshop with a repeatable sale-goods bill while preserving survival reserves.",
     "prioritize_construction": "Give Construction priority 1 to the healthiest best builder so issued blueprints are completed.",
+    "prioritize_construction_project": "Let Laya choose one exact unfinished blueprint/frame and a suitable builder, then issue a normal forced construction job.",
     "prioritize_research": "Give Research priority 1 to the healthiest best researcher so the starflight route advances.",
     "prioritize_cooking": "Give Cooking priority 1 to a capable healthy cook while prepared meals are scarce.",
     "prioritize_growing": "Give Growing priority 1 to a capable healthy grower so crops are planted and harvested.",
@@ -108,15 +116,21 @@ ACTION_LABELS = {
     "unforbid_supplies": "разрешить припасы",
     "create_food_stockpile": "пищевой склад",
     "build_sleeping_spots": "спальные места",
+    "build_basic_beds": "обычные кровати",
     "build_animal_spots": "лежанки животных",
     "care_for_injured_animal": "лечение животного",
     "feed_hungry_animal": "кормление животного",
     "build_cemetery": "кладбище",
+    "create_human_corpse_dump": "дальняя свалка человеческих трупов",
+    "create_animal_corpse_dump": "свалка туш у разделки",
+    "create_stone_chunk_dump": "склад каменных глыб у камнетёса",
+    "build_crematorium": "крематорий",
     "build_prison": "тюрьма",
     "build_hospital": "больница",
     "configure_hospital_beds": "медицинские койки",
     "floor_critical_room": "пол в критической комнате",
     "build_pathways": "дорожки",
+    "build_temple": "храм и ритуальная комната",
     "choose_colony_doctrine": "доктрина колонии",
     "build_private_bedroom": "отдельная спальня",
     "excavate_mountain_bedroom": "вырубить спальню в скале",
@@ -151,6 +165,7 @@ ACTION_LABELS = {
     "income_brewing": "доход: пиво",
     "income_travel_food": "доход: дорожная еда",
     "income_orbital": "доход: орбитальная торговля",
+    "income_organs": "доход: органы пленных",
     "build_income_infrastructure": "цех выбранного дохода",
     "build_killbox": "защитный коридор",
     "build_fallback_defense": "внутренняя линия обороны",
@@ -165,6 +180,7 @@ ACTION_LABELS = {
     "prepare_trade_caravan": "торговая вылазка",
     "configure_income_production": "производство на продажу",
     "prioritize_construction": "строительство",
+    "prioritize_construction_project": "приоритет конкретной постройки",
     "prioritize_research": "исследования",
     "prioritize_cooking": "готовка",
     "prioritize_growing": "растениеводство",
@@ -308,15 +324,15 @@ def room_floor_blueprint(cells: list[dict[str, Any]], floor_def: str) -> tuple[d
 def pathway_blueprint(
     floor_def: str, anchor: dict[str, int], growing_anchor: dict[str, int]
 ) -> tuple[dict[str, Any], dict[str, int]]:
-    """Two-cell-wide route linking the real field, stores, freezer and starter base."""
+    """One-cell-wide outdoor route; broad paved plazas are an avoidable early-game expense."""
     min_x = min(int(growing_anchor["x"]), int(anchor["x"]) - 15)
     max_x = int(anchor["x"]) + 22
     min_z = int(anchor["z"])
     path_z = int(anchor["z"]) + 9
-    absolute = {(x, path_z + dz) for x in range(min_x, max_x + 1) for dz in (0, 1)}
-    absolute |= {(int(anchor["x"]) + dx, z) for z in range(min_z, path_z + 1) for dx in (0, 1)}
+    absolute = {(x, path_z) for x in range(min_x, max_x + 1)}
+    absolute |= {(int(anchor["x"]), z) for z in range(min_z, path_z + 1)}
     floors = [floor(floor_def, x - min_x, z - min_z) for x, z in sorted(absolute)]
-    return blueprint([], max_x - min_x + 1, path_z - min_z + 2, floors), {"x": min_x, "z": min_z}
+    return blueprint([], max_x - min_x + 1, path_z - min_z + 1, floors), {"x": min_x, "z": min_z}
 
 
 def affordable_floor_options(
@@ -332,7 +348,10 @@ def affordable_floor_options(
     steel = int(item_counts.get("Steel") or 0)
     wood = int(item_counts.get("WoodLog") or 0)
     silver = int(item_counts.get("Silver") or 0)
-    if "Stonecutting" in finished and steel >= cell_count + 100:
+    # Concrete is steel, despite looking like a cheap road. Outdoor paths use
+    # renewable stone flagstone only; steel remains reserved for power, coolers,
+    # weapons and the ship.
+    if not pathway and "Stonecutting" in finished and steel >= cell_count + 100:
         options["Concrete"] = f"{cell_count} steel; fast, nonflammable, neutral cleanliness, ugly"
     for stone in ("Granite", "Limestone", "Sandstone", "Slate", "Marble"):
         blocks = int(item_counts.get(f"Blocks{stone}") or 0)
@@ -590,21 +609,78 @@ def sleeping_spots_blueprint(colonist_count: int) -> dict[str, Any]:
     )
 
 
-def freezer_blueprint() -> dict[str, Any]:
+def basic_beds_blueprint(colonist_count: int, stuff: str = "WoodLog") -> dict[str, Any]:
+    count = max(1, min(int(colonist_count), 8))
+    return blueprint(
+        [building("Bed", (index % 4) * 2, (index // 4) * 3, stuff=stuff) for index in range(count)],
+        max(1, min(4, count) * 2 - 1),
+        max(2, ((count - 1) // 4) * 3 + 2),
+    )
+
+
+def freezer_blueprint(*, include_generator: bool = True, wall_stuff: str = "WoodLog") -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     for x in range(6):
-        items.append(building("Wall", x, 0, stuff="WoodLog"))
-        items.append(building("Wall", x, 5, stuff="WoodLog"))
+        items.append(building("Wall", x, 0, stuff=wall_stuff))
+        items.append(building("Wall", x, 5, stuff=wall_stuff))
     for z in range(1, 5):
-        items.append(building("Wall", 0, z, stuff="WoodLog"))
+        items.append(building("Wall", 0, z, stuff=wall_stuff))
         if z != 2:
-            items.append(building("Wall", 5, z, stuff="WoodLog"))
-    items.append(building("Door", 3, 5, stuff="WoodLog"))
+            items.append(building("Wall", 5, z, stuff=wall_stuff))
+    items.append(building("Door", 3, 5, stuff=wall_stuff))
     items.append(building("Cooler", 5, 2, rotation=1))
-    items.append(building("WoodFiredGenerator", 8, 1))
-    for x in range(5, 9):
+    if include_generator:
+        items.append(building("WoodFiredGenerator", 8, 1))
+    for x in range(5, 9 if include_generator else 7):
         items.append(building("PowerConduit", x, 3))
-    return blueprint(items, 11, 6)
+    return blueprint(items, 11 if include_generator else 7, 6)
+
+
+def freezer_resource_plan(
+    building_counts: dict[str, Any], item_counts: dict[str, Any], best_builder: int, finished: set[str]
+) -> dict[str, Any] | None:
+    if "Electricity" not in finished or int(building_counts.get("Cooler", 0)) > 0 or best_builder < 3:
+        return None
+    power_defs = {"WoodFiredGenerator", "SolarGenerator", "WindTurbine", "WatermillGenerator", "GeothermalGenerator"}
+    has_generator = any(int(building_counts.get(name, 0)) > 0 for name in power_defs)
+    required = {
+        "components": 3 + (0 if has_generator else 2),
+        "steel": 90 + (0 if has_generator else 100),
+        "wood": 150,
+    }
+    if (
+        int(item_counts.get("ComponentIndustrial") or 0) < required["components"]
+        or int(item_counts.get("Steel") or 0) < required["steel"]
+        or int(item_counts.get("WoodLog") or 0) < required["wood"]
+    ):
+        return None
+    return {"include_generator": not has_generator, "requirements": required}
+
+
+def temple_blueprint(altar_def: str, wall_stuff: str) -> dict[str, Any]:
+    """A floored 7x7-interior ritual room; no beds or work facilities."""
+    items: list[dict[str, Any]] = []
+    for x in range(9):
+        if x != 4:
+            items.append(building("Wall", x, 0, stuff=wall_stuff))
+        items.append(building("Wall", x, 8, stuff=wall_stuff))
+    for z in range(1, 8):
+        items.append(building("Wall", 0, z, stuff=wall_stuff))
+        items.append(building("Wall", 8, z, stuff=wall_stuff))
+    items.extend([
+        building("Door", 4, 0, stuff=wall_stuff),
+        building(altar_def, 4, 5, stuff=wall_stuff, rotation=2),
+        building("Column", 1, 1, stuff=wall_stuff),
+        building("Column", 7, 1, stuff=wall_stuff),
+        building("Column", 1, 7, stuff=wall_stuff),
+        building("Column", 7, 7, stuff=wall_stuff),
+        building("TorchLamp", 4, 2),
+    ])
+    floor_def = "WoodPlankFloor" if wall_stuff == "WoodLog" else (
+        f"Tile{wall_stuff.removeprefix('Blocks')}" if wall_stuff.startswith("Blocks") else "Concrete"
+    )
+    floors = [floor(floor_def, x, z) for x in range(1, 8) for z in range(1, 8)]
+    return blueprint(items, 9, 9, floors)
 
 
 def power_blueprint() -> dict[str, Any]:
@@ -729,6 +805,8 @@ def collect_development(client: bridge.RimApiClient, snapshot: dict[str, Any]) -
     storage = bridge.safe_get(client, "/api/v1/resources/storages/summary", warnings, map_id=map_id) or {}
     weather = bridge.safe_get(client, "/api/v1/map/weather", warnings, map_id=map_id) or {}
     farm = bridge.safe_get(client, "/api/v1/map/farm/summary", warnings, map_id=map_id) or {}
+    projects_raw = bridge.safe_get(client, "/api/v1/builder/projects", warnings, map_id=map_id) or {}
+    ideology = bridge.safe_get(client, "/api/v1/colony/ideology", warnings) or {}
     tile_id = snapshot.get("map", {}).get("tile_id")
     tile_details = bridge.safe_get(client, "/api/v1/world/tile/details", warnings, id=int(tile_id)) if tile_id is not None else {}
     zones = zones_raw.get("zones", []) if isinstance(zones_raw, dict) else []
@@ -770,6 +848,8 @@ def collect_development(client: bridge.RimApiClient, snapshot: dict[str, Any]) -
         "weather": weather or {},
         "farm": farm or {},
         "tile_details": tile_details or {},
+        "construction_projects": projects_raw.get("projects", []) if isinstance(projects_raw, dict) else [],
+        "ideology": ideology if isinstance(ideology, dict) else {},
     }
     return snapshot
 
@@ -847,6 +927,12 @@ def action_description(name: str, snapshot: dict[str, Any]) -> str:
             return f"Recruit prisoner {pawn.get('name', pawn_id)}: {skills}; traits {pawn.get('traits') or []}; requires warden time and food."
         if policy == "release":
             return f"Release healed prisoner {pawn.get('name', pawn_id)} for goodwill when their faction permits it; current goodwill {pawn.get('faction_goodwill', 0)}."
+        if policy == "organs_nonlethal":
+            return (f"Schedule removal of one kidney and one lung from prisoner {pawn.get('name', pawn_id)} without intentionally killing them. "
+                    f"Value {pawn.get('market_value', 0):.0f}; account for surgery failure, medicine, doctor skill, mood and ideology.")
+        if policy == "organs_lethal":
+            return (f"Schedule lethal heart removal from prisoner {pawn.get('name', pawn_id)}. This is irreversible and may cause severe mood, ideology and diplomatic costs; "
+                    f"use only if the medical and social context clearly justifies it.")
         return f"Hold prisoner {pawn.get('name', pawn_id)} for sale; value {pawn.get('market_value', 0):.0f}, requiring food, guarding and a suitable trader."
     if name.startswith("human_reproduction:"):
         _, first_id, second_id, approach = name.split(":", 3)
@@ -878,7 +964,10 @@ def action_label(name: str, snapshot: dict[str, Any]) -> str:
     if name.startswith("prisoner_policy:"):
         _, pawn_id, policy = name.split(":", 2)
         pawn = next((p for p in snapshot.get("combat", {}).get("prisoners", []) if str(p.get("id")) == pawn_id), {})
-        labels = {"recruit": "вербовать", "release": "освободить", "sell": "продать"}
+        labels = {
+            "recruit": "вербовать", "release": "освободить", "sell": "продать",
+            "organs_nonlethal": "почка и лёгкое", "organs_lethal": "летальное изъятие органа",
+        }
         return f"пленный {pawn.get('name', pawn_id)}: {labels.get(policy, policy)}"
     if name.startswith("human_reproduction:"):
         return f"размножение колонистов: {name.rsplit(':', 1)[1]}"
@@ -938,6 +1027,7 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
     current = str((dev["current_research"] or {}).get("name") or "none")
     details: dict[str, Any] = {}
     one_time: list[str] = []
+    item_counts = dev.get("item_counts", {})
 
     if relevant_forbidden(snapshot) and not issued_recently(
         map_state, "unforbid_supplies", tick, retry_ticks=60000
@@ -946,14 +1036,45 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
 
     human_corpses = corpse_rows(snapshot, "CorpsesHumanlike")
     all_corpses = corpse_rows(snapshot)
-    grave_projects = counts.get("Grave", 0) + counts.get("Blueprint_Grave", 0) + counts.get("Frame_Grave", 0)
     if forbidden_corpses(snapshot) and not issued_recently(map_state, "unforbid_corpses", tick, retry_ticks=15000):
         return ["unforbid_corpses"], details
-    if human_corpses and grave_projects < min(8, len(human_corpses)) and "cemetery" not in map_state.setdefault("issued", {}):
-        details["grave_count"] = max(8, len(human_corpses) + 2)
-        return ["build_cemetery"], details
-    if all_corpses and not issued_recently(map_state, "priority:Burial", tick, retry_ticks=30000):
-        return ["prioritize_burial"], details
+    issued = map_state.setdefault("issued", {})
+    human_dump_exists = any("Laya Human Corpse Dump" in str(z.get("label") or "") for z in zones)
+    animal_dump_exists = any("Laya Animal Carcasses" in str(z.get("label") or "") for z in zones)
+    corpse_actions: list[str] = []
+    if human_corpses and not human_dump_exists and "human_corpse_dump" not in issued:
+        corpse_actions.append("create_human_corpse_dump")
+    if human_corpses and counts.get("Grave", 0) < min(4, len(human_corpses)) and "cemetery" not in issued:
+        details["grave_count"] = min(8, max(2, len(human_corpses)))
+        corpse_actions.append("build_cemetery")
+    stone_blocks = [name for name, amount in item_counts.items() if name.startswith("Blocks") and int(amount or 0) >= 170]
+    if (
+        human_corpses and counts.get("ElectricCrematorium", 0) == 0 and stone_blocks
+        and int(item_counts.get("Steel") or 0) >= 70
+        and int(item_counts.get("ComponentIndustrial") or 0) >= 4
+        and max((int((c.get("skills", {}).get("Construction") or {}).get("level") or 0) for c in snapshot["colonists"]), default=0) >= 4
+        and "crematorium" not in issued
+    ):
+        details["crematorium_stuff"] = stone_blocks[0]
+        corpse_actions.append("build_crematorium")
+    elif human_corpses and counts.get("ElectricCrematorium", 0) > 0 and not issued_recently(map_state, "crematorium_bill", tick, retry_ticks=60000):
+        corpse_actions.append("build_crematorium")
+    if any(corpse_rows(snapshot, "CorpsesAnimal")) and not animal_dump_exists and "animal_corpse_dump" not in issued:
+        corpse_actions.append("create_animal_corpse_dump")
+    if all_corpses and (human_dump_exists or animal_dump_exists or counts.get("Grave", 0) > 0) and not issued_recently(map_state, "priority:Burial", tick, retry_ticks=30000):
+        corpse_actions.append("prioritize_burial")
+    if corpse_actions:
+        details["corpse_context"] = {
+            "human": len(human_corpses),
+            "animal": len(corpse_rows(snapshot, "CorpsesAnimal")),
+            "colonists": len(snapshot["colonists"]),
+            "human_dump_exists": human_dump_exists,
+            "animal_dump_exists": animal_dump_exists,
+            "graves": counts.get("Grave", 0),
+            "crematorium": counts.get("ElectricCrematorium", 0),
+        }
+        dev["corpse_context"] = details["corpse_context"]
+        return corpse_actions, details
 
     food_zone = any(
         "Stockpile" in str(z.get("type")) and "Laya Food" in str(z.get("label") or "")
@@ -964,6 +1085,19 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
 
     if counts.get("SleepingSpot", 0) < len(snapshot["colonists"]) and "sleeping_spots" not in map_state["issued"]:
         return ["build_sleeping_spots"], details
+
+    best_builder = max(
+        (int((c.get("skills", {}).get("Construction") or {}).get("level") or 0) for c in snapshot["colonists"]),
+        default=0,
+    )
+    missing_beds = max(0, len(snapshot["colonists"]) - int(counts.get("Bed", 0)))
+    if (
+        missing_beds and best_builder >= 3
+        and int(item_counts.get("WoodLog") or 0) >= missing_beds * 45 + 80
+        and not issued_recently(map_state, "basic_beds", tick, retry_ticks=90000)
+    ):
+        details["basic_bed_count"] = missing_beds
+        return ["build_basic_beds"], details
 
     colony_animals = [animal for animal in snapshot.get("animals", []) if not animal.get("dead")]
     # Low health after a wound has already been tended only needs rest. Reissuing
@@ -1001,7 +1135,10 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
         return ["create_growing_zone"], details
 
     finished_electricity = "Electricity" in finished
-    if finished_electricity and counts.get("Cooler", 0) == 0 and "freezer" not in map_state["issued"]:
+    freezer_plan = freezer_resource_plan(counts, item_counts, best_builder, finished)
+    if freezer_plan and "freezer" not in map_state["issued"]:
+        details["freezer_include_generator"] = freezer_plan["include_generator"]
+        details["freezer_requirements"] = freezer_plan["requirements"]
         return ["build_freezer"], details
 
     if not any(
@@ -1018,10 +1155,6 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
         int(resources.get("food") or 0) >= max(8, len(snapshot["colonists"]) * 3)
         and lowest_food >= 0.30
         and not any(c.get("downed") for c in snapshot["colonists"])
-    )
-    best_builder = max(
-        (int((c.get("skills", {}).get("Construction") or {}).get("level") or 0) for c in snapshot["colonists"]),
-        default=0,
     )
     if survival_stable and best_builder >= 4 and counts.get("SimpleResearchBench", 0) == 0 and "starter_base" not in map_state["issued"]:
         one_time.append("build_starter_base")
@@ -1043,7 +1176,6 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
             one_time.append("advance_research")
             details["research_target"] = target
     anchor = map_state.get("anchor") or {"x": 125, "z": 125}
-    item_counts = dev.get("item_counts", {})
     weather = dev.get("weather") or {}
     outdoor_temperature = float(weather.get("temperature") or 0.0)
     climate_mode = "cold" if outdoor_temperature < 8 else "hot" if outdoor_temperature > 30 else "temperate"
@@ -1223,7 +1355,7 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
         details["critical_floor_options"] = critical_floor_options
         dev["critical_floor_options"] = critical_floor_options
         one_time.append("floor_critical_room")
-    path_options = affordable_floor_options(item_counts, finished, 110, best_builder, pathway=True)
+    path_options = affordable_floor_options(item_counts, finished, 60, best_builder, pathway=True)
     if survival_stable and path_options and "pathways" not in map_state.setdefault("issued", {}):
         details["path_floor_options"] = path_options
         dev["path_floor_options"] = path_options
@@ -1238,6 +1370,14 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
         if (int(pos.get("x") or 0) - int(anchor["x"])) ** 2 + (int(pos.get("z") or 0) - int(anchor["z"])) ** 2 <= 60 ** 2:
             nearby_stones[name] += 1
     has_stonecutter = any(str(table.get("thing_def") or "") == "TableStonecutter" for table in dev.get("work_tables", []))
+    stone_dump_exists = any("Laya Stone Chunks" in str(z.get("label") or "") for z in zones)
+    if has_stonecutter and nearby_stones and not stone_dump_exists and "stone_chunk_dump" not in map_state.setdefault("issued", {}):
+        stonecutter = next(
+            (row for row in dev.get("work_tables", []) if str(row.get("thing_def") or "") == "TableStonecutter"),
+            {},
+        )
+        details["stone_dump_anchor"] = stonecutter.get("position") or anchor
+        one_time.append("create_stone_chunk_dump")
     stonecutting_needed = (
         ("Stonecutting" not in finished and current.lower() == "none")
         or ("Stonecutting" in finished and not has_stonecutter and not issued_recently(map_state, "stonecutting_table", tick, retry_ticks=60000))
@@ -1348,6 +1488,16 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
                 f"human_reproduction:{first_id}:{second_id}:AvoidPregnancy",
             ])
     prisoner_plans = map_state.setdefault("prisoner_plans", {})
+    best_doctor = max((int((c.get("skills", {}).get("Medicine") or {}).get("level") or 0) for c in snapshot["colonists"]), default=0)
+    organ_context = {
+        "doctor_skill": best_doctor,
+        "medicine": int(snapshot["map"]["resources"].get("medicine") or 0),
+        "colonist_traits": {
+            str(c.get("name")): [str(t.get("label") or t.get("name")) for t in c.get("traits", [])]
+            for c in snapshot["colonists"]
+        },
+        "ideology_precepts": (dev.get("ideology") or {}).get("precepts", []),
+    }
     for prisoner in snapshot.get("combat", {}).get("prisoners", []):
         pawn_id = str(prisoner.get("id"))
         if pawn_id in prisoner_plans:
@@ -1357,6 +1507,11 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
         if prisoner.get("faction_can_give_goodwill") and not prisoner.get("faction_permanent_enemy"):
             one_time.append(f"prisoner_policy:{pawn_id}:release")
         one_time.append(f"prisoner_policy:{pawn_id}:sell")
+        if best_doctor >= 8 and int(snapshot["map"]["resources"].get("medicine") or 0) >= 2:
+            one_time.append(f"prisoner_policy:{pawn_id}:organs_nonlethal")
+            one_time.append(f"prisoner_policy:{pawn_id}:organs_lethal")
+            details["organ_context"] = organ_context
+            dev["organ_context"] = organ_context
     # Laya chooses a profit specialization only after immediate food and medical
     # needs are stable. The choice controls later infrastructure and research,
     # but is deliberately revisited after one in-game year rather than permanent.
@@ -1373,6 +1528,7 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
             "income_brewing",
             "income_travel_food",
             "income_orbital",
+            "income_organs",
         ])
     strategy = str(map_state.get("income_strategy") or "")
     strategy_tables = {
@@ -1407,6 +1563,31 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
         str(table.get("thing_def") or "") in strategy_tables[strategy] for table in dev.get("work_tables", [])
     ) and not issued_recently(map_state, f"income_bills:{strategy}", tick, retry_ticks=30000):
         one_time.append("configure_income_production")
+
+    ideology = dev.get("ideology") or {}
+    ritual_buildings = ideology.get("ritual_buildings") or []
+    if survival_stable and ideology.get("active") and ritual_buildings and "temple" not in map_state.setdefault("issued", {}):
+        altar_options = {
+            str(row.get("def_name")): (
+                f"{row.get('label')} / {row.get('precept_name')}; size {row.get('size_x')}x{row.get('size_z')}; "
+                f"stuff cost {row.get('cost_stuff_count')}"
+            )
+            for row in ritual_buildings if row.get("def_name") and counts.get(str(row.get("def_name")), 0) == 0
+        }
+        temple_materials = {
+            name: note for name, note in structure_material_options(item_counts, minimum_units=500).items()
+            if name == "WoodLog" or (name.startswith("Blocks") and "Stonecutting" in finished)
+        }
+        if altar_options and temple_materials:
+            details["temple_options"] = {"altars": altar_options, "materials": temple_materials, "ideology": ideology.get("name")}
+            dev["temple_options"] = details["temple_options"]
+            one_time.append("build_temple")
+
+    projects = [row for row in dev.get("construction_projects", []) if isinstance(row, dict)][:18]
+    if projects and not issued_recently(map_state, "construction_project_priority", tick, retry_ticks=2500):
+        details["construction_project_options"] = projects
+        dev["construction_project_options"] = projects
+        one_time.append("prioritize_construction_project")
     item_counts = dev.get("item_counts", {})
     if survival_stable and int(item_counts.get("WoodLog") or 0) >= 180 and "killbox" not in map_state["issued"]:
         one_time.append("build_killbox")
@@ -1528,353 +1709,220 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
     return list(dict.fromkeys(one_time + maintenance)) or ["hold_survival"], details
 
 
-def choose_action(agent: Any, snapshot: dict[str, Any], candidates: list[str]) -> dict[str, Any]:
-    needs_subchoice = (
-        ("start_stonecutting" in candidates and bool(snapshot.get("development", {}).get("stone_options")))
-        or ("start_taming" in candidates and bool(snapshot.get("development", {}).get("tame_options")))
-        or ("harvest_local_plants" in candidates and bool(snapshot.get("development", {}).get("wild_plant_options")))
-        or ("designate_safe_hunting" in candidates and bool(snapshot.get("development", {}).get("hunt_options")))
-        or ("floor_critical_room" in candidates and bool(snapshot.get("development", {}).get("critical_floor_options")))
-        or ("build_pathways" in candidates and bool(snapshot.get("development", {}).get("path_floor_options")))
-        or ("choose_colony_doctrine" in candidates and bool(snapshot.get("development", {}).get("doctrine_context")))
-        or ("install_sculpture" in candidates and bool(snapshot.get("development", {}).get("sculpture_install_options")))
-        or ("build_animal_barn" in candidates and bool(snapshot.get("development", {}).get("animal_barn_options")))
-    )
-    if len(candidates) == 1 and not needs_subchoice:
-        return {
-            "choice": candidates[0],
-            "confidence": 1.0,
-            "raw": {"mode": "single_feasible_action", "note": "Laya receives choices whenever two or more feasible actions exist."},
-        }
-    criteria = {name: action_description(name, snapshot) for name in candidates}
-    question = {
-        "colony_goal_action": {
-            "type": "choice",
-            "instructions": "Choose the next concrete action that best advances survival and the long-term goal of building a starship and leaving the planet. Every listed action is currently feasible.",
-            "criteria": criteria,
-        }
-    }
-    if any(name.startswith("trade_to:") for name in candidates):
-        question["trade_purchase_plan"] = {
-            "type": "choice",
-            "instructions": "Choose the most useful purchase priority for this trip from actual colony needs. This is a preference, not permission to spend survival reserves.",
-            "criteria": {
-                "medicine": "Buy medicine if treatment reserves are weak.",
-                "components": "Buy components/advanced components for power, production and the ship.",
-                "food": "Buy shelf-stable food only if colony reserves justify the transport cost.",
-                "weapons": "Buy useful ranged weapons or armor when defense is under-equipped.",
-                "livestock": "Buy productive or pack animals when food and handling capacity are sufficient.",
-                "none": "Sell goods and preserve silver when no purchase is clearly needed.",
-            },
-        }
-    stone_options = snapshot.get("development", {}).get("stone_options") or {}
-    if "start_stonecutting" in candidates and stone_options:
-        question["stone_type"] = {
-            "type": "choice",
-            "instructions": "Choose which actually nearby stone chunks should be cut. Consider granite for durable defenses, marble for beauty, and sandstone for faster building.",
-            "criteria": {str(name): f"{count} nearby chunks" for name, count in stone_options.items()},
-        }
-    tame_options = snapshot.get("development", {}).get("tame_options") or []
-    if "start_taming" in candidates and tame_options:
-        handler = snapshot.get("development", {}).get("handler_context") or {}
-        question["tame_target"] = {
-            "type": "choice",
-            "instructions": f"Choose the exact nearby animal, including species and sex. Best handler: {handler.get('name')} skill {handler.get('skill')}, inspiration {handler.get('inspiration') or 'none'}. Inspired Taming guarantees the attempt only when minimum Handling is met.",
-            "criteria": {
-                str(animal["id"]): (
-                    f"{animal.get('def')} {animal.get('gender')}; wildness {float(animal.get('wildness') or 0) * 100:.0f}%; "
-                    f"minimum Handling {animal.get('minimum_handling_skill')}; revenge on failure {float(animal.get('manhunter_on_tame_fail_chance') or 0) * 100:.0f}%; "
-                    f"value {animal.get('market_value')}; meat {animal.get('meat_amount')}; leather {animal.get('leather_amount')}"
-                )
-                for animal in tame_options
-            },
-        }
-    hunt_options = snapshot.get("development", {}).get("hunt_options") or []
-    if "designate_safe_hunting" in candidates and hunt_options:
-        fighters = snapshot.get("development", {}).get("fighter_context") or {}
-        question["hunt_target"] = {
-            "type": "choice",
-            "instructions": f"Choose one exact animal to hunt or reject hunting through the main action choice. Healthy ranged fighters: {fighters.get('healthy_ranged', 0)}, serious ranged weapons: {fighters.get('serious_ranged_weapons', 0)}, average Shooting {fighters.get('average_shooting', 0)}. Thrumbos are offered only with at least 4 healthy shooters, 3 serious ranged weapons and average Shooting 10.",
-            "criteria": {
-                str(animal["id"]): (
-                    f"{animal.get('def')} {animal.get('gender')}; combat power {animal.get('combat_power')}; "
-                    f"revenge when harmed {float(animal.get('harm_revenge_chance') or 0) * 100:.0f}%; "
-                    f"meat {animal.get('meat_amount')}; leather {animal.get('leather_amount')}; market value {animal.get('market_value')}"
-                )
-                for animal in hunt_options
-            },
-        }
-    wild_plant_options = snapshot.get("development", {}).get("wild_plant_options") or {}
-    if "harvest_local_plants" in candidates and wild_plant_options:
-        question["wild_plant_type"] = {
-            "type": "choice",
-            "instructions": "Choose the exact mature wild plant type to harvest using colony shortages and sale opportunities. Ambrosia is a valuable drug/trade good; berries/agave are emergency food; wild healroot supplies medicine; trees supply construction wood.",
-            "criteria": {
-                str(name): (
-                    f"{row.get('label')}: {row.get('count')} mature nearby; expected {row.get('expected_yield')} "
-                    f"of {row.get('harvested_thing')}"
-                )
-                for name, row in wild_plant_options.items()
-            },
-        }
-    critical_floor_options = snapshot.get("development", {}).get("critical_floor_options") or {}
-    if "floor_critical_room" in candidates and critical_floor_options:
-        question["critical_floor_plan"] = {
-            "type": "choice",
-            "instructions": "Choose one real critical room and an affordable floor. A dirty kitchen raises food-poisoning risk; a clean hospital improves tending, surgery and infection outcomes. Preserve emergency material reserves.",
-            "criteria": {
-                str(key): (
-                    f"{row.get('room_kind')} room {row.get('room_id')}, cleanliness {row.get('cleanliness')}, "
-                    f"{len(row.get('cells') or [])} cells, {row.get('floor_def')}: {row.get('cost')}"
-                )
-                for key, row in critical_floor_options.items()
-            },
-        }
-    path_floor_options = snapshot.get("development", {}).get("path_floor_options") or {}
-    if "build_pathways" in candidates and path_floor_options:
-        question["path_material"] = {
-            "type": "choice",
-            "instructions": "Choose a path material only if faster travel between stores, base and fields justifies its construction work and resource cost.",
-            "criteria": dict(path_floor_options),
-        }
-    doctrine_context = snapshot.get("development", {}).get("doctrine_context") or {}
-    if "choose_colony_doctrine" in candidates and doctrine_context:
-        settlement_forms = {
-            "separate_houses": "Separate private houses: better bedroom privacy and expansion, but more walking, walls, heating and defense perimeter.",
-            "compact": "Compact connected base: efficient movement, heating and defense; private rooms are added inside/along the block.",
-            "courtyard": "Stone/wood courtyard settlement: separate rooms around a shared dining/rec center; moderate walking and perimeter cost.",
-        }
-        if doctrine_context.get("mountain_possible"):
-            settlement_forms["mountain"] = "Mine bedrooms and industry into verified solid natural rock: fireproof and defensible, but slow and vulnerable to infestations."
-        question["doctrine_settlement_form"] = {
-            "type": "choice",
-            "instructions": "Choose the persistent settlement form. Changing it guides only future construction; existing buildings will not be demolished.",
-            "criteria": settlement_forms,
-        }
-        question["doctrine_material"] = {
-            "type": "choice",
-            "instructions": f"Choose the default material for future housing from actually sufficient reserves. Current weather: {doctrine_context.get('weather')}; nearby boom animals: {doctrine_context.get('boom_animals_nearby', 0)}. Preserve rare ship and defense resources.",
-            "criteria": dict(doctrine_context.get("material_options") or {}),
-        }
-        question["doctrine_diplomacy"] = {
-            "type": "choice",
-            "instructions": "Choose the default external posture; immediate survival can override it.",
-            "criteria": {
-                "peaceful_trade": "Prefer alliances, release eligible prisoners, trade and defend; raid only for exceptional survival needs.",
-                "defensive": "Trade normally and retaliate or raid only when advantage and reward clearly justify risk.",
-                "expansionist": "Actively evaluate raids and resource expeditions while preserving a defended home force.",
-            },
-        }
-        question["doctrine_military"] = {
-            "type": "choice",
-            "instructions": "Choose the durable military investment emphasis. This changes research and production priority, not emergency combat behavior.",
-            "criteria": {
-                "weapons": "Prioritize reliable ranged weapons and ammunition-independent firepower.",
-                "armor": "Prioritize flak/plate/power armor and survivability.",
-                "fortifications": "Prioritize walls, traps, turrets, mortars and fire protection.",
-                "balanced": "Advance weapons, armor and layered defenses together.",
-            },
-        }
-        question["doctrine_economy"] = {
-            "type": "choice",
-            "instructions": "Choose the main long-term cash engine. Food, medicine and defense reserves always take precedence.",
-            "criteria": {
-                "drugs": "Psychoid into flake/yayo for high value density.",
-                "tailoring": "Cotton/leather into sale apparel.",
-                "art": "Stone/wood into sculptures; also supplies colony beauty.",
-                "livestock": "Animals, wool, milk and leather.",
-                "biofuel": "Boomalopes or surplus organics into chemfuel.",
-                "mining": "Local and scanned mineral deposits, selling a chosen surplus mineral.",
-                "crops": "Surplus corn or other robust food crops.",
-                "brewing": "Hops and beer.",
-                "travel_food": "Pemmican or packaged survival meals.",
-                "orbital": "High-tech production and orbital trade.",
-            },
-        }
-        ore_counts = doctrine_context.get("ores") or {}
-        mining_choices = {
-            str(name): f"{count} visible mineable cells; sell only after construction/technology reserves"
-            for name, count in ore_counts.items()
-            if any(token in str(name).lower() for token in ("gold", "silver", "jade", "uranium", "plasteel", "steel")) and int(count or 0) > 0
-        }
-        if mining_choices:
-            question["doctrine_mining_product"] = {
-                "type": "choice",
-                "instructions": "If mining becomes the economy, choose the current target product from actual deposits. This may be revised when exhausted.",
-                "criteria": mining_choices,
-            }
-        question["doctrine_beauty"] = {
-            "type": "choice",
-            "instructions": "Choose where scarce art and beauty work should go first.",
-            "criteria": {
-                "shared_first": "Dining/recreation room first so one sculpture benefits many colonists and room roles.",
-                "bedrooms_first": "Private bedrooms first for reliable individual mood, especially jealous/greedy pawns.",
-                "hospital_work_first": "Hospital and long-duration workplaces first, then shared rooms and bedrooms.",
-                "balanced": "Improve the currently weakest valuable room by measured impressiveness.",
-            },
-        }
-    sculpture_options = snapshot.get("development", {}).get("sculpture_install_options") or {}
-    if "install_sculpture" in candidates and sculpture_options:
-        question["sculpture_install_plan"] = {
-            "type": "choice",
-            "instructions": "Choose one actual finished sculpture and real room. Shared dining/rec rooms usually multiply the benefit; bedroom art helps one owner; hospitals/workshops help long stays. A sculpture affects room beauty anywhere but a pawn's beauty need only within sight/range.",
-            "criteria": {
-                str(key): f"{row.get('sculpture')} beauty {row.get('beauty')}, quality {row.get('quality')} -> {row.get('room_role')} room {row.get('room_id')}, impressiveness {row.get('impressiveness')}"
-                for key, row in sculpture_options.items()
-            },
-        }
-    barn_options = snapshot.get("development", {}).get("animal_barn_options") or {}
-    if "build_animal_barn" in candidates and barn_options:
-        question["animal_barn_material"] = {
-            "type": "choice",
-            "instructions": f"Choose a future-safe barn wall material. Outdoors {snapshot.get('development', {}).get('weather', {}).get('temperature')}°C; animal comfort range {barn_options.get('comfort_range')}; straw is very flammable.",
-            "criteria": dict(barn_options.get("material_options") or {}),
-        }
-        if barn_options.get("straw_available"):
-            question["animal_barn_floor"] = {
-                "type": "choice",
-                "instructions": "Choose the barn floor. Straw matting prevents most animal filth but is extremely flammable and consumes hay; bare soil costs nothing and cannot become dirty flooring.",
-                "criteria": {
-                    "straw": f"Use straw matting; hay reserve {barn_options.get('hay')}",
-                    "bare": "Leave natural ground; no hay/work/fire cost",
-                },
-            }
-    capability_names = ("Construction", "Plants", "Animals", "Shooting", "Medicine", "Intellectual", "Cooking", "Mining", "Artistic", "Crafting")
+def build_decision_state(snapshot: dict[str, Any]) -> dict[str, Any]:
     capabilities: dict[str, dict[str, Any]] = {}
-    for skill_name in capability_names:
-        ranked = sorted(
-            snapshot["colonists"],
-            key=lambda c: int((c.get("skills", {}).get(skill_name) or {}).get("level") or 0),
-            reverse=True,
-        )
+    for skill_name in ("Construction", "Plants", "Animals", "Shooting", "Medicine", "Intellectual", "Cooking", "Mining", "Artistic", "Crafting"):
+        ranked = sorted(snapshot.get("colonists", []), key=lambda c: int((c.get("skills", {}).get(skill_name) or {}).get("level") or 0), reverse=True)
         if ranked:
-            capabilities[skill_name] = {
-                "best": ranked[0].get("name"),
-                "level": int((ranked[0].get("skills", {}).get(skill_name) or {}).get("level") or 0),
-            }
-    patient_context = [
-        {"name": c.get("name"), "health": c.get("health"), "downed": c.get("downed"), "bleeding": c.get("bleeding_rate")}
-        for c in snapshot["colonists"]
-        if c.get("downed") or float(c.get("health") or 1.0) < 0.85 or float(c.get("bleeding_rate") or 0.0) > 0
-    ]
-    animal_patient_context = [
-        {"name": a.get("name"), "health": a.get("health"), "food": a.get("hunger"), "tendable": a.get("tendable_now")}
-        for a in snapshot.get("animals", [])
-        if a.get("downed") or a.get("tendable_now") or float(a.get("hunger") or 1.0) < 0.25
-    ][:8]
-    compact_state = {
-        "goal": "Self-sufficient colony, starship, leave planet.",
-        "colony": {
-            "date": snapshot["game"].get("date"),
-            "wealth": snapshot["game"].get("wealth"),
-            "population": len(snapshot["colonists"]),
-            "threats": snapshot["map"].get("enemies"),
-        },
-        "resources": snapshot["map"]["resources"],
-        "people": [
-            {"name": c["name"], "health": c["health"], "food": c["hunger"], "downed": c["downed"], "mood": c["mood"], "job": c["current_job"]}
-            for c in snapshot["colonists"][:12]
-        ],
-        "capabilities": capabilities,
-        "patients": patient_context,
-        "animal_patients": animal_patient_context,
-        "colony_animals": {
-            "count": len(snapshot.get("animals", [])),
-            "hungry": sum(1 for a in snapshot.get("animals", []) if float(a.get("hunger") or 1.0) < 0.3),
-            "reproductive": sum(1 for a in snapshot.get("animals", []) if a.get("reproductive")),
-        },
-        "development": {
-            "buildings": snapshot["development"]["building_counts"],
-            "zones": [z.get("type") for z in snapshot["development"]["zones"]],
-            "research": (snapshot["development"]["current_research"] or {}).get("name"),
-            "finished_research": snapshot["development"]["finished_research"],
-            "human_corpses": len(corpse_rows(snapshot, "CorpsesHumanlike")),
-            "animal_corpses": len(corpse_rows(snapshot, "CorpsesAnimal")),
-            "trade_goods_value": snapshot["development"].get("trade_value", 0),
-            "friendly_trade_destinations_known": len(snapshot["development"].get("settlements", [])),
-            "active_caravans": len(snapshot["development"].get("caravans", [])),
-            "active_quests": len(snapshot["development"].get("quests", [])),
-            "income_strategy": snapshot["development"].get("income_strategy"),
-            "doctrine": snapshot["development"].get("doctrine"),
-            "weather": snapshot["development"].get("weather"),
-            "growing_period": (snapshot["development"].get("tile_details") or {}).get("growing_period"),
-            "crop_forecast": (snapshot["development"].get("farm") or {}).get("crop_types", []),
-            "rooms": [
-                {"id": r.get("id"), "role": r.get("role_label"), "temperature": r.get("temperature"), "cleanliness": r.get("cleanliness"), "impressiveness": r.get("impressiveness")}
-                for r in snapshot["development"].get("rooms", []) if not r.get("touches_map_edge")
-            ][:20],
-            "storage_utilization_percent": (snapshot["development"].get("storage") or {}).get("utilization_percent", 0),
-            "material_counts": {
-                name: snapshot["development"].get("item_counts", {}).get(name, 0)
-                for name in ("Silver", "WoodLog", "Steel", "ComponentIndustrial", "MedicineHerbal", "MedicineIndustrial", "Ambrosia")
-            },
-        },
-    }
-    raw = agent.predict(compact_state, question)
-    answer = raw["answers"]["colony_goal_action"]
-    choice = str(answer["choice"])
-    if choice not in candidates:
-        choice = candidates[0]
-    purchase = None
-    if "trade_purchase_plan" in question:
-        purchase_answer = raw.get("answers", {}).get("trade_purchase_plan", {})
-        if purchase_answer.get("choice") in question["trade_purchase_plan"]["criteria"]:
-            purchase = str(purchase_answer["choice"])
-    stone_type = None
-    if "stone_type" in question:
-        candidate = str(raw.get("answers", {}).get("stone_type", {}).get("choice") or "")
-        if candidate in question["stone_type"]["criteria"]:
-            stone_type = candidate
-    tame_target = None
-    if "tame_target" in question:
-        candidate = str(raw.get("answers", {}).get("tame_target", {}).get("choice") or "")
-        if candidate in question["tame_target"]["criteria"]:
-            tame_target = int(candidate)
-    wild_plant_type = None
-    if "wild_plant_type" in question:
-        candidate = str(raw.get("answers", {}).get("wild_plant_type", {}).get("choice") or "")
-        if candidate in question["wild_plant_type"]["criteria"]:
-            wild_plant_type = candidate
-    hunt_target = None
-    if "hunt_target" in question:
-        candidate = str(raw.get("answers", {}).get("hunt_target", {}).get("choice") or "")
-        if candidate in question["hunt_target"]["criteria"]:
-            hunt_target = int(candidate)
-    critical_floor_plan = None
-    if "critical_floor_plan" in question:
-        candidate = str(raw.get("answers", {}).get("critical_floor_plan", {}).get("choice") or "")
-        if candidate in question["critical_floor_plan"]["criteria"]:
-            critical_floor_plan = candidate
-    path_material = None
-    if "path_material" in question:
-        candidate = str(raw.get("answers", {}).get("path_material", {}).get("choice") or "")
-        if candidate in question["path_material"]["criteria"]:
-            path_material = candidate
-    subchoices: dict[str, Any] = {}
-    for question_id in (
-        "doctrine_settlement_form", "doctrine_material", "doctrine_diplomacy",
-        "doctrine_military", "doctrine_economy", "doctrine_mining_product",
-        "doctrine_beauty", "sculpture_install_plan", "animal_barn_material",
-        "animal_barn_floor",
-    ):
-        if question_id not in question:
-            continue
-        candidate = str(raw.get("answers", {}).get(question_id, {}).get("choice") or "")
-        if candidate in question[question_id]["criteria"]:
-            subchoices[question_id] = candidate
+            capabilities[skill_name] = {"best": ranked[0].get("name"), "level": int((ranked[0].get("skills", {}).get(skill_name) or {}).get("level") or 0)}
+    people = []
+    for c in snapshot.get("colonists", [])[:12]:
+        people.append({
+            "id": c.get("id"), "name": c.get("name"), "health": c.get("health"), "food": c.get("hunger"),
+            "rest": c.get("rest"), "mood": c.get("mood"), "downed": c.get("downed"), "job": c.get("current_job"),
+            "traits": [t.get("label") or t.get("name") for t in c.get("traits", [])],
+            "capacities": c.get("capacities", {}), "pain": c.get("pain", 0),
+            "conditions": [f"{h.get('label') or h.get('def_name')}:{h.get('part')}" for h in c.get("health_conditions", [])],
+        })
+    dev = snapshot.get("development", {})
     return {
-        "choice": choice,
-        "confidence": bridge.first_number(answer.get("confidence")),
-        "trade_purchase": purchase,
-        "stone_type": stone_type,
-        "tame_target": tame_target,
-        "wild_plant_type": wild_plant_type,
-        "hunt_target": hunt_target,
-        "critical_floor_plan": critical_floor_plan,
-        "path_material": path_material,
-        **subchoices,
-        "raw": raw,
+        "goal": "Self-sufficient colony, starship, leave planet.",
+        "colony": {"date": snapshot.get("game", {}).get("date"), "wealth": snapshot.get("game", {}).get("wealth"), "population": len(people), "threats": snapshot.get("map", {}).get("enemies")},
+        "resources": snapshot.get("map", {}).get("resources", {}),
+        "people": people,
+        "capabilities": capabilities,
+        "colony_animals": {"count": len(snapshot.get("animals", [])), "hungry": sum(1 for a in snapshot.get("animals", []) if float(a.get("hunger") or 1.0) < 0.3)},
+        "development": {
+            "buildings": dev.get("building_counts", {}), "zones": [z.get("label") for z in dev.get("zones", [])],
+            "research": (dev.get("current_research") or {}).get("name"), "finished_research": dev.get("finished_research", []),
+            "human_corpses": len(corpse_rows(snapshot, "CorpsesHumanlike")), "animal_corpses": len(corpse_rows(snapshot, "CorpsesAnimal")),
+            "corpse_context": dev.get("corpse_context"), "organ_context": dev.get("organ_context"),
+            "trade_goods_value": dev.get("trade_value", 0), "income_strategy": dev.get("income_strategy"), "doctrine": dev.get("doctrine"),
+            "weather": dev.get("weather"), "growing_period": (dev.get("tile_details") or {}).get("growing_period"),
+            "rooms": [{"id": r.get("id"), "role": r.get("role_label"), "cleanliness": r.get("cleanliness"), "impressiveness": r.get("impressiveness")} for r in dev.get("rooms", []) if not r.get("touches_map_edge")][:20],
+            "storage_utilization_percent": (dev.get("storage") or {}).get("utilization_percent", 0),
+            "materials": {name: dev.get("item_counts", {}).get(name, 0) for name in ("Silver", "WoodLog", "Steel", "ComponentIndustrial", "MedicineHerbal", "MedicineIndustrial", "Ambrosia")},
+        },
     }
+
+
+def action_domain(name: str) -> str:
+    if name.startswith(("income_", "trade_to:", "raid_to:", "prisoner_policy:")): return "economy_diplomacy"
+    if name.startswith(("prioritize_", "harvest_", "designate_", "start_", "breed_")): return "work_orders"
+    if name.startswith(("build_killbox", "build_fallback", "build_turret", "build_mortar", "build_firefoam", "process_mechanoids")): return "defense"
+    if name in {"care_for_injured_animal", "feed_hungry_animal", "build_hospital", "configure_hospital_beds", "build_prison"}: return "care"
+    if name in {"unforbid_corpses", "create_human_corpse_dump", "create_animal_corpse_dump", "build_cemetery", "build_crematorium"}: return "corpse_management"
+    if name.startswith(("build_", "create_", "expand_", "floor_", "install_", "commission_", "excavate_", "finish_")): return "construction"
+    return "strategy"
+
+
+def action_family(name: str) -> str:
+    for prefix in ("trade_to:", "raid_to:", "prisoner_policy:", "human_reproduction:", "breed_animals:"):
+        if name.startswith(prefix): return prefix.rstrip(":")
+    if name.startswith("income_"): return "income_strategy"
+    if name.startswith("prioritize_"): return "work_priority"
+    if name.startswith("build_"): return "building_project"
+    if name.startswith("create_"): return "zone_or_production"
+    return name.split(":", 1)[0]
+
+
+def worker_criteria(snapshot: dict[str, Any], skill_name: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for pawn in snapshot.get("colonists", []):
+        if pawn.get("downed") or float(pawn.get("health") or 0) < 0.65:
+            continue
+        work_name = "Hauling" if skill_name == "Hauling" else skill_name
+        if (pawn.get("work_priorities", {}).get(work_name) or {}).get("disabled"):
+            continue
+        skill = int((pawn.get("skills", {}).get(skill_name) or {}).get("level") or 0)
+        traits = ", ".join(str(t.get("label") or t.get("name")) for t in pawn.get("traits", [])) or "no notable traits"
+        conditions = ", ".join(f"{h.get('label') or h.get('def_name')} {h.get('part')}" for h in pawn.get("health_conditions", [])) or "no visible injury"
+        caps = pawn.get("capacities") or {}
+        result[str(pawn["id"])] = (
+            f"{pawn.get('name')}: {skill_name} {skill}; traits {traits}; health {pawn.get('health')}; pain {pawn.get('pain')}; "
+            f"moving {caps.get('moving', 1)}, manipulation {caps.get('manipulation', 1)}, sight {caps.get('sight', 1)}; {conditions}"
+        )
+    return result
+
+
+def subchoice_questions_for_action(action: str, snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    dev = snapshot.get("development", {})
+    q: dict[str, dict[str, Any]] = {}
+    if action.startswith("trade_to:"):
+        q["trade_purchase_plan"] = {"type": "choice", "instructions": "Choose a purchase priority; survival reserves are protected by code.", "criteria": {
+            "medicine": "Medicine", "components": "Components and advanced components", "food": "Shelf-stable food",
+            "weapons": "Weapons or armor", "livestock": "Productive or pack animals", "none": "Sell only and preserve silver",
+        }}
+    elif action == "start_stonecutting" and dev.get("stone_options"):
+        q["stone_type"] = {"type": "choice", "instructions": "Choose the nearby chunk type to cut.", "criteria": {str(k): f"{v} nearby chunks" for k, v in dev["stone_options"].items()}}
+    elif action == "start_taming" and dev.get("tame_options"):
+        handler = dev.get("handler_context") or {}
+        q["tame_target"] = {"type": "choice", "instructions": f"Choose an exact animal. Handler {handler}.", "criteria": {
+            str(a["id"]): f"{a.get('def')} {a.get('gender')}; wildness {a.get('wildness')}; minimum skill {a.get('minimum_handling_skill')}; revenge {a.get('manhunter_on_tame_fail_chance')}; value {a.get('market_value')}"
+            for a in dev["tame_options"]
+        }}
+    elif action == "designate_safe_hunting" and dev.get("hunt_options"):
+        q["hunt_target"] = {"type": "choice", "instructions": f"Choose the exact target using food need and fighter context {dev.get('fighter_context')}.", "criteria": {
+            str(a["id"]): f"{a.get('def')} {a.get('gender')}; power {a.get('combat_power')}; revenge {a.get('harm_revenge_chance')}; meat {a.get('meat_amount')}; leather {a.get('leather_amount')}; value {a.get('market_value')}"
+            for a in dev["hunt_options"]
+        }}
+    elif action == "harvest_local_plants" and dev.get("wild_plant_options"):
+        q["wild_plant_type"] = {"type": "choice", "instructions": "Choose one mature wild plant type using food, medicine, wood and trade needs.", "criteria": {
+            str(k): f"{v.get('label')}: {v.get('count')} plants, expected {v.get('expected_yield')} {v.get('harvested_thing')}" for k, v in dev["wild_plant_options"].items()
+        }}
+    elif action == "floor_critical_room" and dev.get("critical_floor_options"):
+        q["critical_floor_plan"] = {"type": "choice", "instructions": "Choose a real kitchen/hospital and affordable floor.", "criteria": {
+            str(k): f"{v.get('room_kind')} {v.get('room_id')}; cleanliness {v.get('cleanliness')}; {v.get('floor_def')} {v.get('cost')}" for k, v in dev["critical_floor_options"].items()
+        }}
+    elif action == "build_pathways" and dev.get("path_floor_options"):
+        q["path_material"] = {"type": "choice", "instructions": "Choose fireproof outdoor flagstone; steel floors are intentionally unavailable.", "criteria": dict(dev["path_floor_options"])}
+    elif action == "install_sculpture" and dev.get("sculpture_install_options"):
+        q["sculpture_install_plan"] = {"type": "choice", "instructions": "Choose the finished sculpture and room.", "criteria": {
+            str(k): f"{v.get('sculpture')} beauty {v.get('beauty')} -> {v.get('room_role')} room {v.get('room_id')}" for k, v in dev["sculpture_install_options"].items()
+        }}
+    elif action == "build_animal_barn" and dev.get("animal_barn_options"):
+        opts = dev["animal_barn_options"]
+        q["animal_barn_material"] = {"type": "choice", "instructions": "Choose the barn wall material.", "criteria": dict(opts.get("material_options") or {})}
+        if opts.get("straw_available"):
+            q["animal_barn_floor"] = {"type": "choice", "instructions": "Choose straw or bare ground considering filth, hay and fire.", "criteria": {"straw": "Low filth, consumes hay, highly flammable", "bare": "Free, nonflammable natural ground"}}
+    elif action == "build_temple" and dev.get("temple_options"):
+        opts = dev["temple_options"]
+        q["temple_altar"] = {"type": "choice", "instructions": f"Choose the exact ritual focus for {opts.get('ideology')}.", "criteria": dict(opts.get("altars") or {})}
+        q["temple_material"] = {"type": "choice", "instructions": "Choose an affordable, preferably fireproof temple material.", "criteria": dict(opts.get("materials") or {})}
+    elif action == "prioritize_construction_project" and dev.get("construction_project_options"):
+        q["construction_project"] = {"type": "choice", "instructions": "Choose one exact unfinished project. Prefer survival-critical, nearly finished, and materially feasible work.", "criteria": {
+            str(p["thing_id"]): f"{p.get('label')} ({p.get('kind')}) {float(p.get('percent_complete') or 0) * 100:.0f}% at {p.get('position')}; stuff {p.get('stuff_def_name')}" for p in dev["construction_project_options"]
+        }}
+        q["worker_pawn"] = {"type": "choice", "instructions": "Choose a builder using Construction, manipulation, movement, traits and injuries.", "criteria": worker_criteria(snapshot, "Construction")}
+    elif action in {"prioritize_construction", "prioritize_burial"}:
+        skill = "Construction" if action == "prioritize_construction" else "Hauling"
+        q["worker_pawn"] = {"type": "choice", "instructions": "Choose the exact colonist. Corpse-tolerant traits reduce mood cost; injuries and missing limbs reduce throughput.", "criteria": worker_criteria(snapshot, skill)}
+    elif action == "choose_colony_doctrine" and dev.get("doctrine_context"):
+        d = dev["doctrine_context"]
+        forms = {"separate_houses": "Private houses", "compact": "Compact connected base", "courtyard": "Courtyard settlement"}
+        if d.get("mountain_possible"): forms["mountain"] = "Mountain base: fireproof/defensible but slow and infestation-prone"
+        q.update({
+            "doctrine_settlement_form": {"type": "choice", "instructions": "Choose future settlement form; existing buildings stay.", "criteria": forms},
+            "doctrine_material": {"type": "choice", "instructions": "Choose future building material from sufficient reserves.", "criteria": dict(d.get("material_options") or {})},
+            "doctrine_diplomacy": {"type": "choice", "instructions": "Choose external posture.", "criteria": {"peaceful_trade": "Trade/alliance first", "defensive": "Defend and raid only for advantage", "expansionist": "Actively evaluate raids and expeditions"}},
+            "doctrine_military": {"type": "choice", "instructions": "Choose military investment.", "criteria": {"weapons": "Weapons", "armor": "Armor", "fortifications": "Layered fortifications", "balanced": "Balanced"}},
+            "doctrine_economy": {"type": "choice", "instructions": "Choose long-term cash engine.", "criteria": {"drugs": "Drugs", "tailoring": "Apparel", "art": "Sculptures", "livestock": "Animals/products", "biofuel": "Chemfuel", "mining": "Minerals", "crops": "Surplus crops", "brewing": "Beer", "travel_food": "Caravan food", "orbital": "Orbital trade", "organs": "Prisoner organs with medical/social costs"}},
+            "doctrine_beauty": {"type": "choice", "instructions": "Choose where beauty matters first.", "criteria": {"shared_first": "Dining/rec", "bedrooms_first": "Bedrooms", "hospital_work_first": "Hospital/work", "balanced": "Weakest valuable room"}},
+        })
+    return {name: question for name, question in q.items() if question.get("criteria")}
+
+
+def choose_action(agent: Any, snapshot: dict[str, Any], candidates: list[str]) -> dict[str, Any]:
+    state = build_decision_state(snapshot)
+    raw_domain = None
+    raw_family = None
+    considered = list(candidates)
+    if len(candidates) > 18:
+        domains: dict[str, list[str]] = {}
+        for name in candidates:
+            domains.setdefault(action_domain(name), []).append(name)
+        domain_question = {"colony_goal_domain": {"type": "choice", "instructions": "Choose the next decision domain. A second question will contain only feasible actions in that domain.", "criteria": {
+            domain: "; ".join(action_label(name, snapshot) for name in names[:8]) for domain, names in domains.items()
+        }}}
+        raw_domain = agent.predict(state, domain_question)
+        selected_domain = str(raw_domain.get("answers", {}).get("colony_goal_domain", {}).get("choice") or "")
+        considered = domains.get(selected_domain) or next(iter(domains.values()))
+    if len(considered) > 18:
+        families: dict[str, list[str]] = {}
+        for name in considered:
+            families.setdefault(action_family(name), []).append(name)
+        family_question = {"colony_goal_family": {"type": "choice", "instructions": "Choose a feasible action family; the next question will contain concrete actions only from it.", "criteria": {
+            family: "; ".join(action_label(name, snapshot) for name in names[:8]) for family, names in families.items()
+        }}}
+        raw_family = agent.predict(state, family_question)
+        selected_family = str(raw_family.get("answers", {}).get("colony_goal_family", {}).get("choice") or "")
+        considered = families.get(selected_family) or next(iter(families.values()))
+    considered = considered[:18]
+
+    raw_action = None
+    if len(considered) == 1:
+        choice = considered[0]
+        action_answer = {"choice": choice, "confidence": 1.0, "probabilities": {choice: 1.0}}
+        mode = "single_feasible_action"
+    else:
+        action_question = {"colony_goal_action": {"type": "choice", "instructions": "Choose the next concrete feasible action for survival and eventual starflight. Parameters of unchosen actions will not be asked.", "criteria": {name: action_description(name, snapshot) for name in considered}}}
+        raw_action = agent.predict(state, action_question)
+        action_answer = raw_action.get("answers", {}).get("colony_goal_action", {})
+        choice = str(action_answer.get("choice") or "")
+        if choice not in considered: choice = considered[0]
+        mode = "hierarchical"
+
+    detail_questions = subchoice_questions_for_action(choice, snapshot)
+    raw_details = agent.predict(state, detail_questions) if detail_questions else None
+    parsed: dict[str, Any] = {}
+    merged_answers = {"colony_goal_action": action_answer}
+    if raw_details:
+        merged_answers.update(raw_details.get("answers", {}))
+        for question_id, question in detail_questions.items():
+            selected = str(raw_details.get("answers", {}).get(question_id, {}).get("choice") or "")
+            if selected not in question["criteria"]:
+                continue
+            if question_id in {"tame_target", "hunt_target", "worker_pawn", "construction_project"}:
+                parsed[question_id] = int(selected)
+            else:
+                parsed[question_id] = selected
+
+    if choice == "choose_colony_doctrine" and parsed.get("doctrine_economy") == "mining":
+        ores = (snapshot.get("development", {}).get("doctrine_context") or {}).get("ores") or {}
+        mining = {str(name): f"{count} visible cells" for name, count in ores.items() if int(count or 0) > 0 and any(t in str(name).lower() for t in ("gold", "silver", "jade", "uranium", "plasteel", "steel"))}
+        if mining:
+            third_question = {"doctrine_mining_product": {"type": "choice", "instructions": "Mining was selected; now choose the actual surplus mineral target.", "criteria": mining}}
+            third = agent.predict(state, third_question)
+            selected = str(third.get("answers", {}).get("doctrine_mining_product", {}).get("choice") or "")
+            if selected in mining: parsed["doctrine_mining_product"] = selected
+            merged_answers.update(third.get("answers", {}))
+            if raw_details is None: raw_details = {"answers": {}}
+
+    aliases = {"trade_purchase_plan": "trade_purchase"}
+    for source, target in aliases.items():
+        if source in parsed: parsed[target] = parsed.pop(source)
+    raw = {"mode": mode, "domain": raw_domain, "family": raw_family, "action": raw_action, "details": raw_details, "answers": merged_answers}
+    return {"choice": choice, "confidence": bridge.first_number(action_answer.get("confidence"), 1.0), **parsed, "raw": raw}
 
 
 def publish_overlay(
@@ -1977,8 +2025,12 @@ def post_blueprint(client: bridge.RimApiClient, map_id: int, anchor: dict[str, i
     )
 
 
-def prioritize(client: bridge.RimApiClient, snapshot: dict[str, Any], work: str) -> Any:
-    target = bridge.choose_worker(snapshot["colonists"], work)
+def prioritize(client: bridge.RimApiClient, snapshot: dict[str, Any], work: str, pawn_id: int | None = None) -> Any:
+    target = next(
+        (p for p in snapshot["colonists"] if pawn_id is not None and int(p.get("id", -1)) == int(pawn_id)),
+        None,
+    )
+    target = target or bridge.choose_worker(snapshot["colonists"], work)
     if target is None:
         return {"applied": False, "reason": f"No eligible colonist for {work}"}
     response = client.post(
@@ -2187,6 +2239,59 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
         )
         issued["cemetery"] = tick
         return result
+    if choice == "create_human_corpse_dump":
+        dump_x = max(6, min(240, int(anchor["x"]) + (50 if int(anchor["x"]) < 125 else -50)))
+        dump_z = max(6, min(240, int(anchor["z"]) + (45 if int(anchor["z"]) < 125 else -45)))
+        terrain = client.get("/api/v1/map/terrain", map_id=map_id)
+        dump_anchor = find_terrain_rect(
+            terrain, {"x": dump_x, "z": dump_z}, 6, 6,
+            {"Soil", "SoilRich", "Gravel", "Sand", "MarshyTerrain"}, radius=35,
+        ) or {"x": dump_x, "z": dump_z}
+        dump_x, dump_z = int(dump_anchor["x"]), int(dump_anchor["z"])
+        result = client.post("/api/v1/map/zone/stockpile", body={
+            "map_id": map_id,
+            "point_a": position(dump_x, dump_z),
+            "point_b": position(dump_x + 5, dump_z + 5),
+            "name": "Laya Human Corpse Dump",
+            "priority": 5,
+            "allowed_item_categories": ["CorpsesHumanlike"],
+        })
+        issued["human_corpse_dump"] = tick
+        return {"applied": True, "distance_from_base": abs(dump_x - int(anchor["x"])) + abs(dump_z - int(anchor["z"])), "response": result}
+    if choice == "create_animal_corpse_dump":
+        result = client.post("/api/v1/map/zone/stockpile", body={
+            "map_id": map_id,
+            "point_a": position(anchor["x"] + 15, anchor["z"] + 7),
+            "point_b": position(anchor["x"] + 19, anchor["z"] + 10),
+            "name": "Laya Animal Carcasses",
+            "priority": 5,
+            "allowed_item_categories": ["CorpsesAnimal"],
+        })
+        issued["animal_corpse_dump"] = tick
+        return result
+    if choice == "create_stone_chunk_dump":
+        near = details.get("stone_dump_anchor") or anchor
+        x, z = int((near or {}).get("x") or anchor["x"]), int((near or {}).get("z") or anchor["z"])
+        result = client.post("/api/v1/map/zone/stockpile", body={
+            "map_id": map_id,
+            "point_a": position(x + 2, z - 2),
+            "point_b": position(x + 5, z + 2),
+            "name": "Laya Stone Chunks",
+            "priority": 3,
+            "allowed_item_categories": ["StoneChunks"],
+        })
+        issued["stone_chunk_dump"] = tick
+        return result
+    if choice == "build_crematorium":
+        tables = [row for row in snapshot["development"].get("work_tables", []) if row.get("thing_def") == "ElectricCrematorium"]
+        if tables:
+            result = ensure_bill(client, tables[0], "CremateCorpse", 25)
+            issued["crematorium_bill"] = tick
+            return {"applied": True, "phase": "configure", "response": result}
+        stuff = str(details.get("crematorium_stuff") or "BlocksGranite")
+        result = post_blueprint(client, map_id, anchor, workshop_blueprint("ElectricCrematorium", stuff=stuff), dx=-18, dz=19)
+        issued["crematorium"] = tick
+        return {"applied": True, "phase": "build", "stuff": stuff, "response": result}
     if choice == "build_prison":
         result = post_blueprint(client, map_id, anchor, prison_blueprint(), dx=-12, dz=-8)
         issued["prison_blueprint"] = tick
@@ -2233,8 +2338,17 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
         })
         issued["pathways"] = tick
         return {"applied": True, "material": material, "response": result}
+    if choice == "build_temple":
+        altar = str(details.get("temple_altar") or "")
+        material = str(details.get("temple_material") or "")
+        options = details.get("temple_options") or {}
+        if altar not in (options.get("altars") or {}) or material not in (options.get("materials") or {}):
+            return {"applied": False, "reason": "Laya did not select a valid ideology altar and affordable material"}
+        result = post_blueprint(client, map_id, anchor, temple_blueprint(altar, material), dx=35, dz=17)
+        issued["temple"] = tick
+        return {"applied": True, "altar": altar, "material": material, "response": result}
     if choice == "prioritize_burial":
-        result = prioritize(client, snapshot, "Hauling")
+        result = prioritize(client, snapshot, "Hauling", details.get("worker_pawn"))
         issued["priority:Burial"] = tick
         issued["priority:Hauling"] = tick
         return result
@@ -2260,6 +2374,11 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
         )
         issued["sleeping_spots"] = tick
         return result
+    if choice == "build_basic_beds":
+        count = int(details.get("basic_bed_count") or len(snapshot["colonists"]))
+        result = post_blueprint(client, map_id, anchor, basic_beds_blueprint(count), dx=1, dz=11)
+        issued["basic_beds"] = tick
+        return {"applied": True, "beds": count, "response": result}
     if choice == "build_animal_spots":
         animals = [animal for animal in snapshot.get("animals", []) if not animal.get("dead")]
         result = post_blueprint(
@@ -2357,7 +2476,7 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
             "response": response,
         }
     if choice == "build_freezer":
-        result = post_blueprint(client, map_id, anchor, freezer_blueprint())
+        result = post_blueprint(client, map_id, anchor, freezer_blueprint(include_generator=bool(details.get("freezer_include_generator", True))))
         issued["freezer"] = tick
         return result
     if choice == "create_stockpile":
@@ -2449,7 +2568,7 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
             "drugs": "drugs", "tailoring": "tailoring", "art": "art",
             "livestock": "livestock", "biofuel": "biofuel", "mining": "mining",
             "crops": "crops", "brewing": "brewing", "travel_food": "travel_food",
-            "orbital": "orbital",
+            "orbital": "orbital", "organs": "organs",
         }
         if strategy not in strategy_names:
             raise bridge.RimApiError(f"Unknown income strategy: {strategy}")
@@ -2506,6 +2625,12 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
         if strategy == "orbital":
             research = select_research_if_available(client, "MicroelectronicsBasics")
             return {"applied": bool(research.get("applied", True)), "strategy": strategy, "response": research}
+        if strategy == "organs":
+            return {
+                "applied": True,
+                "strategy": strategy,
+                "note": "Organ harvesting remains per-prisoner and is offered only with doctor skill 8+, medicine, and explicit Laya selection.",
+            }
         # Mine the compact local gold vein first. Long-range scanning is added to
         # the research route after local precious ore is exhausted.
         ores = snapshot["development"].get("ores", {}).get("ores", {})
@@ -2634,6 +2759,19 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
     if choice.startswith("prisoner_policy:"):
         _, pawn_id_text, policy = choice.split(":", 2)
         pawn_id = int(pawn_id_text)
+        if policy in {"organs_nonlethal", "organs_lethal"}:
+            organs = ["Kidney", "Lung"] if policy == "organs_nonlethal" else ["Heart"]
+            responses = [
+                client.post("/api/v1/pawn/prisoner/organ-plan", body={
+                    "prisoner_pawn_id": pawn_id,
+                    "organ_def_name": organ,
+                    "allow_lethal": policy == "organs_lethal",
+                })
+                for organ in organs
+            ]
+            map_state.setdefault("prisoner_plans", {})[str(pawn_id)] = policy
+            issued[f"prisoner:{pawn_id}:{policy}"] = tick
+            return {"applied": True, "prisoner_id": pawn_id, "policy": policy, "organs": organs, "responses": responses}
         response = client.post("/api/v1/pawn/prisoner/policy", body={
             "prisoner_pawn_id": pawn_id,
             "policy": policy,
@@ -2692,9 +2830,22 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
         issued["trade_caravan"] = tick
         return response
     if choice == "prioritize_construction":
-        result = prioritize(client, snapshot, "Construction")
+        result = prioritize(client, snapshot, "Construction", details.get("worker_pawn"))
         issued["priority:Construction"] = tick
         return result
+    if choice == "prioritize_construction_project":
+        project_id = details.get("construction_project")
+        worker_id = details.get("worker_pawn")
+        if project_id is None or worker_id is None:
+            return {"applied": False, "reason": "Laya did not select both an exact project and builder"}
+        priority = prioritize(client, snapshot, "Construction", int(worker_id))
+        response = client.post("/api/v1/builder/prioritize", body={
+            "map_id": map_id,
+            "project_thing_id": int(project_id),
+            "pawn_id": int(worker_id),
+        })
+        issued["construction_project_priority"] = tick
+        return {"applied": True, "project_id": int(project_id), "builder_id": int(worker_id), "responses": [priority, response]}
     if choice == "prioritize_research":
         result = prioritize(client, snapshot, "Research")
         issued["priority:Research"] = tick
@@ -2786,21 +2937,10 @@ def run_development_cycle(client: bridge.RimApiClient, agent: Any, state: dict[s
         )
     candidates, details = candidate_actions(client, snapshot, map_state)
     decision = choose_action(agent, snapshot, candidates)
-    if decision.get("trade_purchase"):
-        details["trade_purchase"] = decision["trade_purchase"]
-    if decision.get("stone_type"):
-        details["stone_type"] = decision["stone_type"]
-    if decision.get("tame_target") is not None:
-        details["tame_target"] = decision["tame_target"]
-    if decision.get("wild_plant_type"):
-        details["wild_plant_type"] = decision["wild_plant_type"]
-    if decision.get("hunt_target") is not None:
-        details["hunt_target"] = decision["hunt_target"]
-    if decision.get("critical_floor_plan"):
-        details["critical_floor_plan"] = decision["critical_floor_plan"]
-    if decision.get("path_material"):
-        details["path_material"] = decision["path_material"]
     for key in (
+        "trade_purchase", "stone_type", "tame_target", "wild_plant_type", "hunt_target",
+        "critical_floor_plan", "path_material", "worker_pawn", "construction_project",
+        "temple_altar", "temple_material",
         "doctrine_settlement_form", "doctrine_material", "doctrine_diplomacy",
         "doctrine_military", "doctrine_economy", "doctrine_mining_product",
         "doctrine_beauty", "sculpture_install_plan", "animal_barn_material",

@@ -43,5 +43,5 @@ $config = [ordered]@{
 }
 $config | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $projectDir "laya-control.json") -Encoding UTF8
 
-Write-Host "Installed Laya RimWorld Director 0.0.1."
+Write-Host "Installed Laya RimWorld Director 0.0.2."
 Write-Host "Enable Harmony and RIMAPI - Laya Director fork in RimWorld, restart the game, load a copied save, then run Start-Autonomous.ps1."

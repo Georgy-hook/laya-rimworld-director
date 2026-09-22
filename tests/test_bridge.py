@@ -30,6 +30,24 @@ class FakeAgent:
         }
 
 
+class RosterAgent:
+    def __init__(self):
+        self.calls = []
+
+    def predict(self, state, questions):
+        self.calls.append(questions)
+        answers = {}
+        for question_id, question in questions.items():
+            if question_id == "threat_action":
+                choice = "engage_ranged"
+            elif question_id == "fighter_10":
+                choice = "reserve"
+            else:
+                choice = "deploy"
+            answers[question_id] = {"choice": choice, "confidence": 0.9, "probabilities": {choice: 1.0}}
+        return {"answers": answers}
+
+
 class BridgeTests(unittest.TestCase):
     def snapshot(self):
         return {
@@ -200,6 +218,35 @@ class BridgeTests(unittest.TestCase):
         attack_commands = [command for command in action["commands"] if command.get("body", {}).get("job_def") == "AttackStatic"]
         self.assertEqual({command["body"]["pawn_id"] for command in attack_commands}, {10, 11})
         self.assertTrue(all(command["body"]["target_thing_id"] == 99 for command in attack_commands))
+
+    def test_laya_selects_combat_roster_using_health_context(self):
+        snapshot = self.snapshot()
+        snapshot["map"]["enemies"] = 1
+        snapshot["combat"] = {
+            "available": True,
+            "colonists": [
+                {"id": 10, "name": "Ada", "health": 0.9, "is_dead": False, "is_downed": False,
+                 "has_ranged_weapon": True, "shooting_skill": 12, "melee_skill": 3,
+                 "manipulation": 0.45, "moving": 1.0, "sight": 1.0, "pain": 0.2,
+                 "health_conditions": ["MissingBodyPart:Arm"], "traits": [],
+                 "distance_to_nearest_opponent": 8, "position": {"x": 10, "z": 10}},
+                {"id": 11, "name": "Bo", "health": 1.0, "is_dead": False, "is_downed": False,
+                 "has_ranged_weapon": True, "shooting_skill": 8, "melee_skill": 5,
+                 "manipulation": 1.0, "moving": 1.0, "sight": 1.0, "pain": 0.0,
+                 "health_conditions": [], "traits": ["Tough"],
+                 "distance_to_nearest_opponent": 9, "position": {"x": 9, "z": 10}},
+            ],
+            "hostiles": [{"id": 99, "name": "Raider", "health": 1.0, "is_dead": False,
+                          "is_downed": False, "position": {"x": 18, "z": 10}, "current_job": "AttackStatic"}],
+            "available_weapons": [],
+        }
+        agent = RosterAgent()
+        decision = bridge.decide(agent, snapshot, 0.0)
+        self.assertEqual(decision["selected_fighter_ids"], [11])
+        self.assertEqual(len(agent.calls), 2)
+        action = bridge.plan_action(snapshot, decision)
+        attacks = [c for c in action["commands"] if c.get("body", {}).get("job_def") == "AttackStatic"]
+        self.assertEqual([c["body"]["pawn_id"] for c in attacks], [11])
 
     def test_remote_api_is_rejected(self):
         with self.assertRaises(ValueError):

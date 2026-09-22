@@ -19,7 +19,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 
-APP_NAME = "Laya Control Center 0.0.1"
+APP_NAME = "Laya Control Center 0.0.2"
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "laya-control.json"
 DEFAULT_CONFIG = {

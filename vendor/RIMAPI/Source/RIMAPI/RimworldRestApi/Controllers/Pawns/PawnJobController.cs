@@ -70,6 +70,15 @@ namespace RIMAPI.Controllers
             await context.SendJsonResponse(result);
         }
 
+        [Post("/api/v1/pawn/prisoner/organ-plan")]
+        [EndpointMetadata("Add a validated normal surgery bill to remove one selected prisoner organ")]
+        public async Task AddPrisonerOrganPlan(HttpListenerContext context)
+        {
+            var body = await context.Request.ReadBodyAsync<PrisonerOrganPlanRequestDto>();
+            var result = _pawnJobService.AddPrisonerOrganPlan(body);
+            await context.SendJsonResponse(result);
+        }
+
         [Post("/api/v1/map/beds/configure")]
         [EndpointMetadata("Mark completed beds in an exact area as medical or prisoner beds")]
         public async Task ConfigureBeds(HttpListenerContext context)

@@ -16,7 +16,7 @@ from urllib.request import Request, urlopen
 
 DEFAULT_API_URL = "http://localhost:8765"
 DEFAULT_MODEL = "convaiinnovations/laya"
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 SAFE_WORK_TYPES = {
     "prioritize_cooking": "Cooking",
     "prioritize_growing": "Growing",
@@ -138,6 +138,29 @@ def normalize_colonists(rows: Any) -> list[dict[str, Any]]:
             for item in (work.get("work_priorities") or [])
             if isinstance(item, dict) and item.get("work_type")
         }
+        traits = [
+            {
+                "name": str(item.get("name") or ""),
+                "label": str(item.get("label") or item.get("name") or ""),
+                "description": str(item.get("description") or ""),
+                "suppressed": bool(item.get("suppressed")),
+            }
+            for item in (work.get("traits") or [])
+            if isinstance(item, dict) and not item.get("suppressed")
+        ]
+        hediffs = [
+            {
+                "def_name": str(item.get("def_name") or ""),
+                "label": str(item.get("label") or item.get("label_cap") or ""),
+                "part": str(item.get("part_label") or item.get("part_def_name") or ""),
+                "severity": round(first_number(item.get("severity")), 3),
+                "permanent": bool(item.get("is_permanent")),
+                "bleeding": bool(item.get("bleeding")),
+                "tendable_now": bool(item.get("tendable_now")),
+            }
+            for item in (medical.get("hediffs") or [])
+            if isinstance(item, dict) and item.get("visible", True)
+        ]
         pawn_id = pawn.get("id")
         if pawn_id is None:
             continue
@@ -159,6 +182,15 @@ def normalize_colonists(rows: Any) -> list[dict[str, Any]]:
                 "position": pawn.get("position") or {},
                 "skills": skills,
                 "work_priorities": priorities,
+                "traits": traits,
+                "health_conditions": hediffs,
+                "capacities": {
+                    "consciousness": round(first_number(medical.get("consciousness"), 1.0), 3),
+                    "moving": round(first_number(medical.get("moving"), 1.0), 3),
+                    "manipulation": round(first_number(medical.get("manipulation"), 1.0), 3),
+                    "sight": round(first_number(medical.get("sight"), 1.0), 3),
+                },
+                "pain": round(first_number(medical.get("pain")), 3),
                 "relations": (details.get("social_info") or {}).get("direct_relations") or [],
             }
         )
@@ -511,7 +543,49 @@ def decide(agent: Any, snapshot: dict[str, Any], confidence_threshold: float) ->
     if choice not in SAFE_WORK_TYPES and choice not in COMBAT_CHOICES and choice != "keep_current_plan":
         reason = f"Blocked non-whitelisted choice: {choice}"
         choice = "keep_current_plan"
-    return {"choice": choice, "confidence": confidence, "reason": reason, "raw": raw}
+    selected_fighter_ids = None
+    roster_choices = {
+        "engage_ranged", "engage_melee", "draft_best_defender", "preemptive_strike",
+        "focus_mechanoids", "focus_insects",
+    }
+    if choice in roster_choices:
+        eligible = [
+            pawn for pawn in snapshot["combat"].get("colonists", [])
+            if not pawn.get("is_dead") and not pawn.get("is_downed") and first_number(pawn.get("health")) >= 0.72
+        ]
+        has_medical_tradeoff = any(
+            pawn.get("health_conditions")
+            or first_number(pawn.get("manipulation"), 1.0) < 0.8
+            or first_number(pawn.get("moving"), 1.0) < 0.8
+            or first_number(pawn.get("sight"), 1.0) < 0.8
+            or first_number(pawn.get("pain")) > 0.25
+            for pawn in eligible
+        )
+        if len(eligible) > 1 or has_medical_tradeoff:
+            roster_questions: dict[str, dict[str, Any]] = {}
+            for pawn in eligible:
+                context = (
+                    f"{pawn.get('name')}: Shooting {pawn.get('shooting_skill', 0)}, Melee {pawn.get('melee_skill', 0)}, "
+                    f"weapon {pawn.get('weapon_label') or 'none'}, health {pawn.get('health')}, pain {pawn.get('pain', 0)}, "
+                    f"moving {pawn.get('moving', 1)}, manipulation {pawn.get('manipulation', 1)}, sight {pawn.get('sight', 1)}, "
+                    f"traits {pawn.get('traits') or []}, conditions {pawn.get('health_conditions') or []}."
+                )
+                roster_questions[f"fighter_{int(pawn['id'])}"] = {
+                    "type": "choice",
+                    "instructions": context + " Decide whether this exact colonist should deploy for the already selected combat plan. A missing arm, low movement/sight, pain or poor weapon can justify reserve; Tough and strong combat skills can justify deploy.",
+                    "criteria": {"deploy": "Join the selected combat plan.", "reserve": "Remain undrafted for safety, rescue and home work."},
+                }
+            roster_raw = agent.predict(decision_state(snapshot), roster_questions)
+            selected_fighter_ids = [
+                int(question_id.removeprefix("fighter_"))
+                for question_id, answer_row in roster_raw.get("answers", {}).items()
+                if question_id.startswith("fighter_") and answer_row.get("choice") == "deploy"
+            ]
+            raw["roster"] = roster_raw
+    return {
+        "choice": choice, "confidence": confidence, "reason": reason, "raw": raw,
+        "selected_fighter_ids": selected_fighter_ids,
+    }
 
 
 def plan_action(snapshot: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any]:
@@ -557,6 +631,9 @@ def plan_action(snapshot: dict[str, Any], decision: dict[str, Any]) -> dict[str,
             c for c in snapshot["combat"]["colonists"]
             if not c.get("is_dead") and not c.get("is_downed") and first_number(c.get("health")) >= 0.72
         ]
+        if decision.get("selected_fighter_ids") is not None:
+            selected = set(map(int, decision.get("selected_fighter_ids") or []))
+            fighters = [pawn for pawn in fighters if int(pawn.get("id", -1)) in selected]
         hostiles = [h for h in snapshot["combat"]["hostiles"] if not h.get("is_dead") and not h.get("is_downed")]
         if not fighters or not hostiles:
             return {"kind": "noop", "description": "No eligible fighter or hostile target"}

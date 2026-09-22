@@ -2,7 +2,7 @@
 
 > Experimental autonomous colony management for RimWorld 1.6, powered by the local open-weight Laya decision model.
 
-Version **0.0.1** · Windows · Python 3.10+ · RimWorld 1.6 · GPL-3.0
+Version **0.0.2 (developing)** · Windows · Python 3.10+ · RimWorld 1.6 · GPL-3.0
 
 Laya RimWorld Director reads a colony through a modified local RIMAPI mod, gives the model a bounded set of real and currently feasible choices, and converts the selected choice into ordinary RimWorld work priorities, designations, bills, blueprints, research, caravans and combat orders.
 
@@ -10,18 +10,20 @@ It is not a prerecorded build order. Laya sees compact context, chooses between 
 
 The project is unofficial and experimental. It can make bad decisions and lose a colony. **Use a copied save.**
 
-## What 0.0.1 can do
+## What 0.0.2 can do
 
 - Food: unforbid starting supplies, create food storage/freezer space, cook, butcher, hunt and harvest wild edible plants.
 - Farming: select crops, consider current season and forecast temperatures, pause late sowing without destroying existing crops, and resume viable seasonal sowing.
-- Storage: expand near-full stockpiles and configure dedicated weapon shelves.
+- Storage: expand near-full stockpiles, configure dedicated weapon shelves, place stone chunks beside the stonecutter, animal carcasses beside butchering, and human corpses in a distant critical-priority dump.
 - Housing and rooms: choose compact, courtyard, separate-house or mountain development; choose real available construction materials; build private bedrooms without replacing existing rooms.
 - Beauty and hygiene: measure room cleanliness and impressiveness, choose kitchen/hospital floors, commission sculptures and install finished art in a selected real room.
 - Animals: feed and rescue colony animals, avoid repeatedly treating an already-bandaged animal, make sleeping spots, build climate-aware barns, use optional straw matting, tame a selected species/sex and plan breeding.
-- Industry and income: stonecutting, drugs, clothing, sculptures, livestock products, chemfuel, valuable minerals, crops, beer, travel food and orbital trade.
+- Industry and income: stonecutting, drugs, clothing, sculptures, livestock products, chemfuel, valuable minerals, crops, beer, travel food, orbital trade, and an explicit high-risk prisoner-organ route.
 - Diplomacy and travel: choose a real friendly settlement, form a safe trade caravan, retain home defenders and supplies, and resolve prisoner recruit/release/sale plans through normal systems.
 - Defense: layered firing positions, traps, turrets, mortars, firefoam, weapons/armor research and equipment priorities.
-- Combat: distinguish staging raids from active assaults, either prepare undrafted or strike, resume verified raid auto-pauses, coordinate several healthy fighters, and prioritize insects, mechanoids or EMP where appropriate.
+- Combat: distinguish staging raids from active assaults, either prepare undrafted or strike, resume verified raid auto-pauses, and let Laya select the roster using skills, weapons, traits, pain, missing parts, movement, manipulation and sight.
+- Construction: choose an exact unfinished blueprint/frame and builder; avoid outdoor steel roads; build a freezer only when its cooler, power and component prerequisites are affordable.
+- Ideology: inspect the current colony ideology and build a ritual room around its exact required altar or ideogram.
 - Ancient Danger: treat the proximity warning as a sealed strategic site rather than a raid; Laya chooses to leave it, prepare, or designate a normal wall-deconstruction job to open it, then resumes the warning pause.
 - Long-term doctrine: settlement form, default material, economy, diplomacy, military emphasis, mining product and beauty priority persist across cycles and appear in the GUI.
 - Observability: an in-game overlay and Windows control center show choices, probabilities, results and exportable history.
@@ -42,7 +44,7 @@ Prerequisites:
 4. An NVIDIA GPU is recommended; CPU mode is supported but slower.
 5. At least roughly 1 GB free for model weights and additional space for PyTorch.
 
-Download the `laya-rimworld-director-0.0.1.zip` release, extract it, open PowerShell in the extracted folder and run:
+Download the `laya-rimworld-director-0.0.2.zip` release, extract it, open PowerShell in the extracted folder and run:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
@@ -91,12 +93,14 @@ Stop the console director with `Ctrl+C`, or click **Остановить** in th
 
 ## How decisions work
 
-Each cycle follows four stages:
+Each cycle follows a hierarchical decision pipeline:
 
 1. Collect a bounded snapshot from local RIMAPI endpoints.
 2. Build only feasible choices using verified IDs, resources, skills, research, temperature, rooms, factions and map state.
-3. Ask Laya one or more typed choice questions and retain its probabilities.
-4. Validate the selected choice again and translate it into normal game commands.
+3. If the list is large, choose a domain and action family first.
+4. Choose one concrete action.
+5. Ask only for parameters belonging to that selected action; rejecting hunting never asks for prey, and rejecting wild harvest never asks for a plant.
+6. Validate the selected choice again and translate it into normal game commands.
 
 Emergency survival gates run before long-horizon planning. Combat is checked much more often than ordinary development. Repeated orders are suppressed using a persistent state file and signatures of active combatants/jobs.
 
@@ -140,10 +144,10 @@ python -m venv .venv
 Modified RIMAPI (requires the .NET 8 SDK; targets .NET Framework 4.7.2 through reference packages):
 
 ```powershell
-dotnet build vendor\RIMAPI\Source\RIMAPI\RIMAPI.csproj -c Release-1.6
+dotnet build vendor\RIMAPI\Source\RIMAPI\RimApi.csproj -c Release-1.6
 ```
 
-The 0.0.1 release passes 25 Python tests and compiles the C# mod with zero warnings/errors.
+The 0.0.2 development branch passes 34 Python tests and compiles the C# mod with zero warnings/errors.
 
 ## Data and privacy
 

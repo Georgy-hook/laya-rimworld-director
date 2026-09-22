@@ -110,6 +110,11 @@ namespace RIMAPI.Services
                 Gender = pawn.gender.ToString(),
                 BiologicalAge = pawn.ageTracker?.AgeBiologicalYears ?? 0,
                 BleedingRate = pawn.health?.hediffSet?.BleedRateTotal ?? 0f,
+                Consciousness = pawn.health?.capacities?.GetLevel(PawnCapacityDefOf.Consciousness) ?? 0f,
+                Moving = pawn.health?.capacities?.GetLevel(PawnCapacityDefOf.Moving) ?? 0f,
+                Manipulation = pawn.health?.capacities?.GetLevel(PawnCapacityDefOf.Manipulation) ?? 0f,
+                Sight = pawn.health?.capacities?.GetLevel(PawnCapacityDefOf.Sight) ?? 0f,
+                Pain = pawn.health?.hediffSet?.PainTotal ?? 0f,
                 MarketValue = pawn.MarketValue,
                 SocialSkill = pawn.skills?.GetSkill(SkillDefOf.Social)?.Level ?? 0,
                 MedicineSkill = pawn.skills?.GetSkill(SkillDefOf.Medicine)?.Level ?? 0,
@@ -124,6 +129,10 @@ namespace RIMAPI.Services
                 Traits = pawn.story?.traits?.allTraits?.Select(t => t.LabelCap).Take(8).ToList() ?? new List<string>(),
                 TopSkills = pawn.skills?.skills?.OrderByDescending(s => s.Level)
                     .Take(5).Select(s => $"{s.def.label}:{s.Level}").ToList() ?? new List<string>(),
+                HealthConditions = pawn.health?.hediffSet?.hediffs?
+                    .Where(h => h.Visible)
+                    .Select(h => $"{h.def.defName}:{h.Part?.def?.defName ?? "whole body"}")
+                    .Take(12).ToList() ?? new List<string>(),
             };
         }
     }

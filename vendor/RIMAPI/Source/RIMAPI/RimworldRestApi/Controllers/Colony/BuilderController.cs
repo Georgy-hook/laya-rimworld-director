@@ -4,6 +4,7 @@ using RIMAPI.Core;
 using RIMAPI.Helpers;
 using RIMAPI.Models;
 using RIMAPI.Services;
+using RIMAPI.Http;
 
 namespace RIMAPI.Controllers
 {
@@ -61,6 +62,23 @@ namespace RIMAPI.Controllers
         {
             var body = await context.Request.ReadBodyAsync<ConfigureStorageBuildingsRequestDto>();
             var result = BuilderAutomationHelper.ConfigureStorageBuildings(body);
+            await context.SendJsonResponse(result);
+        }
+
+        [Get("/api/v1/builder/projects")]
+        [EndpointMetadata("List exact unfinished construction blueprints and frames")]
+        public async Task GetConstructionProjects(HttpListenerContext context)
+        {
+            var result = _builderService.GetConstructionProjects(RequestParser.GetMapId(context));
+            await context.SendJsonResponse(result);
+        }
+
+        [Post("/api/v1/builder/prioritize")]
+        [EndpointMetadata("Order a selected colonist to work on one exact construction project")]
+        public async Task PrioritizeConstruction(HttpListenerContext context)
+        {
+            var body = await context.Request.ReadBodyAsync<PrioritizeConstructionRequestDto>();
+            var result = _builderService.PrioritizeConstruction(body);
             await context.SendJsonResponse(result);
         }
     }

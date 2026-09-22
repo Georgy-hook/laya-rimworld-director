@@ -35,6 +35,11 @@ namespace RIMAPI.Models
         public string Gender { get; set; }
         public int BiologicalAge { get; set; }
         public float BleedingRate { get; set; }
+        public float Consciousness { get; set; }
+        public float Moving { get; set; }
+        public float Manipulation { get; set; }
+        public float Sight { get; set; }
+        public float Pain { get; set; }
         public float MarketValue { get; set; }
         public int SocialSkill { get; set; }
         public int MedicineSkill { get; set; }
@@ -48,6 +53,7 @@ namespace RIMAPI.Models
         public int FactionGoodwill { get; set; }
         public List<string> Traits { get; set; } = new List<string>();
         public List<string> TopSkills { get; set; } = new List<string>();
+        public List<string> HealthConditions { get; set; } = new List<string>();
     }
 
     public class CombatWeaponDto

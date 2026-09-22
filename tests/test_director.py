@@ -15,6 +15,29 @@ SPEC.loader.exec_module(director)
 
 
 class DirectorTests(unittest.TestCase):
+    class FakeAgent:
+        def __init__(self, choices):
+            self.choices = iter(choices)
+            self.calls = []
+
+        def predict(self, state, questions):
+            self.calls.append(questions)
+            answers = {}
+            for question_id, question in questions.items():
+                requested = next(self.choices)
+                self.assert_choice(requested, question["criteria"])
+                answers[question_id] = {
+                    "choice": requested,
+                    "confidence": 0.9,
+                    "probabilities": {name: 1.0 if name == requested else 0.0 for name in question["criteria"]},
+                }
+            return {"answers": answers}
+
+        @staticmethod
+        def assert_choice(choice, criteria):
+            if choice not in criteria:
+                raise AssertionError(f"{choice!r} not in {list(criteria)!r}")
+
     def test_bandaged_animal_is_not_retreated_for_low_health_alone(self):
         self.assertFalse(director.animal_needs_tending({
             "health": 0.42,
@@ -52,6 +75,38 @@ class DirectorTests(unittest.TestCase):
         decision = director.choose_action(None, {}, ["create_stockpile"])
         self.assertEqual(decision["choice"], "create_stockpile")
         self.assertEqual(decision["raw"]["mode"], "single_feasible_action")
+
+    def test_rejected_hunting_does_not_ask_for_a_target(self):
+        agent = self.FakeAgent(["hold_survival"])
+        snapshot = {"colonists": [], "game": {}, "map": {"resources": {}}, "development": {
+            "hunt_options": [{"id": 7, "def": "Hare"}], "fighter_context": {}, "building_counts": {}, "zones": [],
+        }}
+        result = director.choose_action(agent, snapshot, ["designate_safe_hunting", "hold_survival"])
+        self.assertEqual(result["choice"], "hold_survival")
+        self.assertEqual(len(agent.calls), 1)
+        self.assertEqual(set(agent.calls[0]), {"colony_goal_action"})
+
+    def test_selected_hunting_asks_target_in_second_stage_only(self):
+        agent = self.FakeAgent(["designate_safe_hunting", "7"])
+        snapshot = {"colonists": [], "game": {}, "map": {"resources": {}}, "development": {
+            "hunt_options": [{"id": 7, "def": "Hare", "gender": "Female", "combat_power": 10, "harm_revenge_chance": 0,
+                              "meat_amount": 18, "leather_amount": 8, "market_value": 60}],
+            "wild_plant_options": {"Plant_Ambrosia": {"count": 4}}, "fighter_context": {}, "building_counts": {}, "zones": [],
+        }}
+        result = director.choose_action(agent, snapshot, ["designate_safe_hunting", "hold_survival"])
+        self.assertEqual(result["hunt_target"], 7)
+        self.assertEqual(len(agent.calls), 2)
+        self.assertEqual(set(agent.calls[1]), {"hunt_target"})
+        self.assertNotIn("wild_plant_type", agent.calls[1])
+
+    def test_rejected_wild_harvest_does_not_ask_which_plant(self):
+        agent = self.FakeAgent(["hold_survival"])
+        snapshot = {"colonists": [], "game": {}, "map": {"resources": {}}, "development": {
+            "wild_plant_options": {"Plant_Ambrosia": {"label": "ambrosia", "count": 4, "expected_yield": 16, "harvested_thing": "Ambrosia"}},
+            "building_counts": {}, "zones": [],
+        }}
+        director.choose_action(agent, snapshot, ["harvest_local_plants", "hold_survival"])
+        self.assertEqual(len(agent.calls), 1)
 
     def test_starter_blueprint_contains_real_work(self):
         layout = director.starter_base_blueprint(3)
@@ -107,6 +162,42 @@ class DirectorTests(unittest.TestCase):
         )
         self.assertNotIn("SterileTile", scarce)
         self.assertIn("SterileTile", rich)
+
+    def test_outdoor_paths_never_offer_steel_floors(self):
+        options = director.affordable_floor_options(
+            {"Steel": 5000, "BlocksGranite": 1000}, {"Stonecutting", "Smithing"}, 60, 12, pathway=True
+        )
+        self.assertNotIn("Concrete", options)
+        self.assertNotIn("MetalTile", options)
+        self.assertIn("FlagstoneGranite", options)
+
+    def test_freezer_can_reuse_existing_generator(self):
+        layout = director.freezer_blueprint(include_generator=False)
+        defs = [row["def_name"] for row in layout["buildings"]]
+        self.assertIn("Cooler", defs)
+        self.assertNotIn("WoodFiredGenerator", defs)
+
+    def test_freezer_is_not_offered_without_components(self):
+        missing = director.freezer_resource_plan(
+            {}, {"Steel": 500, "WoodLog": 500, "ComponentIndustrial": 2}, 8, {"Electricity"}
+        )
+        powered = director.freezer_resource_plan(
+            {"SolarGenerator": 1}, {"Steel": 500, "WoodLog": 500, "ComponentIndustrial": 3}, 8, {"Electricity"}
+        )
+        self.assertIsNone(missing)
+        self.assertFalse(powered["include_generator"])
+
+    def test_basic_beds_are_real_beds(self):
+        layout = director.basic_beds_blueprint(2)
+        self.assertEqual([row["def_name"] for row in layout["buildings"]], ["Bed", "Bed"])
+
+    def test_temple_is_floored_and_has_no_beds_or_worktables(self):
+        layout = director.temple_blueprint("Altar_Small", "BlocksGranite")
+        defs = [row["def_name"] for row in layout["buildings"]]
+        self.assertIn("Altar_Small", defs)
+        self.assertEqual(len(layout["floors"]), 49)
+        self.assertTrue(all(row["def_name"] == "TileGranite" for row in layout["floors"]))
+        self.assertFalse(any(name in {"Bed", "SleepingSpot", "FueledStove", "SimpleResearchBench"} for name in defs))
 
     def test_killbox_keeps_an_open_entrance_and_uses_traps(self):
         layout = director.killbox_blueprint()

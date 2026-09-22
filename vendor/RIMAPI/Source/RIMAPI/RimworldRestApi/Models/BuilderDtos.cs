@@ -42,6 +42,29 @@ namespace RIMAPI.Models
         public int Priority { get; set; } = 4;
     }
 
+    public class ConstructionProjectDto
+    {
+        public int ThingId { get; set; }
+        public string DefName { get; set; }
+        public string Label { get; set; }
+        public string Kind { get; set; }
+        public string StuffDefName { get; set; }
+        public float PercentComplete { get; set; }
+        public PositionDto Position { get; set; }
+    }
+
+    public class ConstructionProjectsDto
+    {
+        public List<ConstructionProjectDto> Projects { get; set; } = new List<ConstructionProjectDto>();
+    }
+
+    public class PrioritizeConstructionRequestDto
+    {
+        public int MapId { get; set; }
+        public int ProjectThingId { get; set; }
+        public int PawnId { get; set; }
+    }
+
     // --- The Blueprint Data Structure ---
     public class BlueprintDto
     {

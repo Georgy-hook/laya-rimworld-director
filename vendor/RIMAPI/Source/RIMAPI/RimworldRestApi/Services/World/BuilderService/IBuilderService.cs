@@ -9,5 +9,7 @@ namespace RIMAPI.Services
         ApiResult PasteArea(PasteAreaRequestDto request);
         ApiResult PlaceBlueprints(PasteAreaRequestDto request);
         ApiResult<CheckZoneResultDto> CheckZone(CheckZoneRequestDto request);
+        ApiResult<ConstructionProjectsDto> GetConstructionProjects(int mapId);
+        ApiResult PrioritizeConstruction(PrioritizeConstructionRequestDto request);
     }
 }
