@@ -18,6 +18,8 @@ from tkinter import ttk
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
+import colony_strategy as strategy
+
 
 APP_NAME = "Laya Control Center 0.0.2"
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
@@ -164,8 +166,18 @@ class ControlCenter(tk.Tk):
             self,
             text="Доктрина: Laya ещё не выбрала долгосрочное направление",
             foreground="#d2a8ff",
+            wraplength=1120,
+            justify="left",
         )
-        self.doctrine_label.pack(fill=X, padx=20, pady=(0, 10))
+        self.doctrine_label.pack(fill=X, padx=20, pady=(0, 3))
+        self.doctrine_catalog_label = ttk.Label(
+            self,
+            text="Каталог направлений появится после аудита загруженного контента.",
+            foreground="#8b949e",
+            wraplength=1120,
+            justify="left",
+        )
+        self.doctrine_catalog_label.pack(fill=X, padx=20, pady=(0, 10))
 
         paned = ttk.Panedwindow(self, orient=tk.VERTICAL)
         paned.pack(fill=BOTH, expand=True, padx=18, pady=(0, 18))
@@ -313,18 +325,35 @@ class ControlCenter(tk.Tk):
             maps = state.get("maps") or {}
             map_state = next(reversed(maps.values())) if maps else {}
             doctrine = map_state.get("doctrine") or {}
+            audit = map_state.get("doctrine_audit") or {}
         except (OSError, json.JSONDecodeError, StopIteration):
             doctrine = {}
+            audit = {}
         if not doctrine:
             text = "Доктрина: Laya ещё не выбрала долгосрочное направление"
         else:
-            text = (
-                f"Доктрина: {doctrine.get('settlement_form', '—')} · {doctrine.get('material', '—')} · "
-                f"профиль {doctrine.get('specialization', '—')} · "
-                f"экономика {doctrine.get('economy', '—')} · дипломатия {doctrine.get('diplomacy', '—')} · "
-                f"армия {doctrine.get('military', '—')} · красота {doctrine.get('beauty', '—')}"
-            )
+            labels = doctrine.get("labels") or strategy.doctrine_labels(doctrine)
+            text = "\n".join([
+                f"Курс: {labels.get('domain', '—')} → {labels.get('primary_direction', '—')}",
+                f"Экономика: {labels.get('economy', '—')} · Технологии: {labels.get('technology', '—')} · Финал: {labels.get('endgame', '—')}",
+                f"Поселение: {doctrine.get('settlement_form', '—')} · Оборона: {labels.get('military', '—')} · Дипломатия: {labels.get('diplomacy', '—')}",
+                f"Общество: {labels.get('society', '—')} · Профиль кадров: {doctrine.get('specialization', '—')} · Материал: {doctrine.get('material', '—')}",
+            ])
         self.doctrine_label.configure(text=text)
+        coverage = audit.get("coverage") or {}
+        available = list(audit.get("available_directions") or [])
+        unavailable = audit.get("unavailable_directions") or {}
+        names = [str((strategy.DIRECTIONS.get(key) or {}).get("label") or key) for key in available]
+        active = [name.title() for name, enabled in (audit.get("expansions") or {}).items() if enabled]
+        if coverage:
+            catalog = (
+                f"Аудит: доступно {coverage.get('available', len(available))}/{coverage.get('total', len(strategy.DIRECTIONS))}; "
+                f"активные DLC: {', '.join(active) or 'только Core'}; скрыто из-за неактивного контента: {len(unavailable)}.\n"
+                f"Доступные направления: {', '.join(names) or '—'}"
+            )
+        else:
+            catalog = f"Каталог содержит {len(strategy.DIRECTIONS)} направлений; аудит загруженных DLC выполнится при следующем выборе доктрины."
+        self.doctrine_catalog_label.configure(text=catalog)
 
     def _probe_game(self) -> None:
         try:
@@ -387,17 +416,26 @@ class ControlCenter(tk.Tk):
         row = self.records[index]
         decision = row.get("decision") or {}
         raw = decision.get("raw") or {}
-        probabilities = {}
-        try:
-            answer = next(iter(raw.get("answers", {}).values()))
-            probabilities = answer.get("probabilities") or {}
-        except (StopIteration, AttributeError):
-            pass
+        all_answers = raw.get("answers") or {}
+        cascade_choices = {
+            str(question_id): answer.get("choice")
+            for question_id, answer in all_answers.items() if isinstance(answer, dict)
+        }
+        probability_sets = {
+            str(question_id): {
+                str(key): f"{float(value) * 100:.1f}%"
+                for key, value in (answer.get("probabilities") or {}).items()
+            }
+            for question_id, answer in all_answers.items()
+            if isinstance(answer, dict) and answer.get("probabilities")
+        }
+        action_probabilities = probability_sets.get("colony_goal_action", {})
         summary = {
             "время": row.get("timestamp"),
             "режим": row.get("mode"),
-            "доступные варианты": row.get("candidates") or list(probabilities),
-            "вероятности": {key: f"{float(value) * 100:.1f}%" for key, value in probabilities.items()},
+            "доступные варианты": row.get("candidates") or list(action_probabilities),
+            "каскад решений": cascade_choices,
+            "вероятности по каждому шагу": probability_sets,
             "выбор": decision.get("choice"),
             "уверенность": decision.get("confidence"),
             "действие": row.get("action"),

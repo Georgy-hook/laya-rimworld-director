@@ -5,6 +5,7 @@ import unittest
 
 import colony_combat
 import colony_events
+import colony_strategy
 
 
 ROOT = pathlib.Path(__file__).parents[1]
@@ -427,6 +428,68 @@ class DirectorTests(unittest.TestCase):
         self.assertEqual(result["architecture_house_style"], "compact")
         self.assertEqual(result["architecture_variant"], "house_compact_1")
         self.assertEqual(len(agent.calls), 4)
+
+    def test_strategy_catalog_covers_core_and_every_official_expansion(self):
+        expansions = {row.get("expansion") or "core" for row in colony_strategy.DIRECTIONS.values()}
+        self.assertEqual(expansions, {"core", "royalty", "ideology", "biotech", "anomaly", "odyssey"})
+        self.assertGreaterEqual(len(colony_strategy.DIRECTIONS), 30)
+        self.assertEqual(set(colony_strategy.DOMAIN_LABELS), {row["domain"] for row in colony_strategy.DIRECTIONS.values()})
+
+    def test_direction_audit_filters_inactive_content(self):
+        core = colony_strategy.audit_directions({"active_mods": [{"package_id": "ludeon.rimworld"}]})
+        self.assertIn("research_starflight", core["available"])
+        self.assertIn("gravship_nomads", core["unavailable"])
+        odyssey = colony_strategy.audit_directions({"active_mods": [
+            {"package_id": "ludeon.rimworld"}, {"package_id": "ludeon.rimworld.odyssey"},
+        ]})
+        self.assertIn("gravship_nomads", odyssey["available"])
+
+    def test_doctrine_is_a_conditional_cascade(self):
+        choices = [
+            "choose_colony_doctrine", "prosperity", "industrial_manufacturing",
+            "compact", "manufacturing", "industrial", "ranged_firepower", "pragmatic",
+            "ship_escape", "peaceful_trade", "WoodLog", "balanced", "components",
+        ]
+        agent = self.FakeAgent(choices)
+        context = {
+            "material_options": {"WoodLog": "wood"}, "profession_choices": {},
+            "active_mods": [{"package_id": "ludeon.rimworld"}], "research_tree": [],
+            "building_catalog": [], "profession_directions": {},
+        }
+        context["direction_audit"] = colony_strategy.audit_directions(context)
+        snapshot = {"colonists": [], "game": {}, "map": {"resources": {}}, "development": {
+            "building_counts": {}, "zones": [], "doctrine_context": context,
+        }}
+        result = director.choose_action(agent, snapshot, ["choose_colony_doctrine", "hold_survival"])
+        doctrine = result["doctrine_selection"]
+        self.assertEqual(doctrine["primary_direction"], "industrial_manufacturing")
+        self.assertEqual(doctrine["economy_family"], "manufacturing")
+        self.assertEqual(doctrine["economy_product"], "components")
+        self.assertNotIn("doctrine_mining_product", result["raw"]["answers"])
+        direction_question = agent.calls[2]["doctrine_primary_direction"]["criteria"]
+        self.assertTrue(direction_question)
+        self.assertTrue(all(colony_strategy.DIRECTIONS[key]["domain"] == "prosperity" for key in direction_question))
+
+    def test_doctrine_research_uses_only_live_startable_projects(self):
+        doctrine = {"primary_direction": "industrial_manufacturing", "technology": "industrial", "economy_product": "components"}
+        tree = [
+            {"name": "Fabrication", "label": "Fabrication", "description": "Make advanced components", "can_start_now": True, "is_finished": False, "research_points": 4000},
+            {"name": "BlockedMachining", "label": "Machining", "can_start_now": False, "is_finished": False, "research_points": 1000},
+            {"name": "FinishedComponents", "label": "Components", "can_start_now": True, "is_finished": True, "research_points": 1000},
+        ]
+        options = colony_strategy.doctrine_research_candidates(doctrine, tree)
+        self.assertIn("Fabrication", options)
+        self.assertNotIn("BlockedMachining", options)
+        self.assertNotIn("FinishedComponents", options)
+
+    def test_architecture_includes_strategic_building_programs(self):
+        options = director.architect.program_options({
+            "building_counts": {"SimpleResearchBench": 1}, "rooms": [], "colonists": [], "animals": [],
+            "buildings": [], "storage": {}, "professions": {"directions": {}},
+            "doctrine": {"primary_direction": "industrial_manufacturing", "building_programs": ["factory"]},
+            "finished_research": [], "building_catalog": [],
+        })
+        self.assertIn("factory", options)
 
 
 if __name__ == "__main__":

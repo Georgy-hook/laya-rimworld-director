@@ -6,7 +6,7 @@ Version **0.0.2 (developing)** · Windows · Python 3.10+ · RimWorld 1.6 · GPL
 
 Laya RimWorld Director reads a colony through a modified local RIMAPI mod, gives the model a bounded set of real and currently feasible choices, and converts the selected choice into ordinary RimWorld work priorities, designations, bills, blueprints, research, caravans and combat orders.
 
-It is not a prerecorded build order. Laya sees compact context, chooses between alternatives with probabilities, keeps a persistent colony doctrine, and can revise that doctrine when resources or conditions change. The long-term objective is a self-sufficient colony that researches, builds and launches a ship.
+It is not a prerecorded build order. Laya sees compact context, chooses between alternatives with probabilities, keeps a persistent colony doctrine, and can revise that doctrine when resources or conditions change. The long-term objective is a self-sufficient colony pursuing the ending or continuity strategy Laya selected from the content actually loaded in the game.
 
 The project is unofficial and experimental. It can make bad decisions and lose a colony. **Use a copied save.**
 
@@ -38,7 +38,7 @@ The project is unofficial and experimental. It can make bad decisions and lose a
 - Construction: choose an exact unfinished blueprint/frame and builder; avoid outdoor steel roads; build a freezer only when its cooler, power and component prerequisites are affordable.
 - Ideology: inspect the current colony ideology and build a ritual room around its exact required altar or ideogram.
 - Ancient Danger: treat the proximity warning as a sealed strategic site rather than a raid; Laya chooses to leave it, prepare, or designate a normal wall-deconstruction job to open it, then resumes the warning pause.
-- Long-term doctrine: settlement form, default material, economy, diplomacy, military emphasis, mining product and beauty priority persist across cycles and appear in the GUI.
+- Content-aware doctrine v2: 30 Core/DLC strategic archetypes are composed with settlement, economy, technology, defense, society, diplomacy and all official endgame axes. Inactive DLC choices are hidden; the selected course, available catalogue and every cascade probability appear in the GUI.
 - Observability: an in-game overlay and Windows control center show choices, probabilities, results and exportable history.
 
 ## Safety model
@@ -132,6 +132,7 @@ modified RIMAPI (C#, Harmony)
 colony_director.py
   ↳ colony_professions.py (live professions, passions, training, schedules)
   ↳ colony_architect.py (programs, technology gates, procedural layouts)
+  ↳ colony_strategy.py (DLC-aware strategy audit, cascaded doctrine, research matching)
   ↕ typed questions + probabilities
 convaiinnovations/laya (local PyTorch model)
 
@@ -144,6 +145,8 @@ Important files:
 - `colony_director.py` — long-horizon autonomous planner and executor.
 - `colony_professions.py` — profession-fit scoring, passion-aware skill development and Night Owl schedules.
 - `colony_architect.py` — live building catalog interpretation and procedural room/base design.
+- `colony_strategy.py` — audited Core/DLC direction catalogue and conditional doctrine selection.
+- `DIRECTION_AUDIT.md` — source-backed coverage matrix and extension contract.
 - `rimworld_laya.py` — local API client and combat decision loop.
 - `colony_combat.py` — tactical catalogue, threat-sensitive filtering and psycast choices.
 - `colony_events.py` — extensible event-family classification and response hierarchy.
@@ -159,7 +162,7 @@ Python:
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m py_compile colony_director.py colony_professions.py colony_architect.py rimworld_laya.py laya_control.py
+.\.venv\Scripts\python.exe -m py_compile colony_director.py colony_professions.py colony_architect.py colony_strategy.py rimworld_laya.py laya_control.py
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
@@ -169,7 +172,7 @@ Modified RIMAPI (requires the .NET 8 SDK; targets .NET Framework 4.7.2 through r
 dotnet build vendor\RIMAPI\Source\RIMAPI\RimApi.csproj -c Release-1.6
 ```
 
-The 0.0.2 development branch passes 50 Python tests and compiles the C# mod with zero warnings/errors.
+The 0.0.2 development branch passes 55 Python tests and compiles the C# mod with zero warnings/errors.
 
 ## Data and privacy
 
@@ -181,7 +184,7 @@ The 0.0.2 development branch passes 50 Python tests and compiles the C# mod with
 
 ## Limitations
 
-- RimWorld is a complex, partially observable simulation; successful starflight is not guaranteed.
+- RimWorld is a complex, partially observable simulation; completion of the selected ending is not guaranteed.
 - The current release targets Windows and RimWorld 1.6.
 - Mod compatibility is not guaranteed.
 - Trade purchasing is expressed as a priority; not every trader or transaction can satisfy it.

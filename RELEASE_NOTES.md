@@ -4,6 +4,11 @@ Development release focused on correcting the decision architecture and the surv
 
 Highlights:
 
+- audited doctrine v2 with 30 strategic archetypes covering Core, Royalty, Ideology, Biotech, Anomaly and Odyssey;
+- active-package filtering so unavailable DLC mechanics cannot be selected, while future/mod definitions remain discoverable through live catalogues;
+- conditional doctrine cascade: domain → direction → compatible axes → selected economy product → mineral only for mining;
+- doctrine-driven live research, architecture, fortification filtering and ending selection;
+- expanded GUI doctrine panel with active DLC coverage, every currently valid direction, and probability history for every cascade stage;
 - hierarchical Laya/Jev flow: domain → action family → action → only the selected action's parameters;
 - exact construction-project and builder selection through normal RimWorld work givers;
 - real beds after emergency sleeping spots, with skill and resource gates;
@@ -25,7 +30,7 @@ Highlights:
 - additive workbench upgrade chains that retain the old bench until its researched replacement is constructed;
 - a live building-definition catalog so DLC/mod construction is discoverable without hard-coding every Def;
 - stockpile priorities now preserve RimWorld's complete 0–5 range, so Critical food/corpse zones work as intended;
-- 44 deterministic Python tests and a zero-warning C# build.
+- 55 deterministic Python tests and a zero-warning C# build.
 
 The branch remains experimental. Use copied saves and review the GUI/overlay decision history.
 

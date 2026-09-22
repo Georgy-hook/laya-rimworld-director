@@ -13,6 +13,7 @@ import rimworld_laya as bridge
 import colony_architect as architect
 import colony_professions as professions
 import colony_events as events
+import colony_strategy as strategy
 
 
 RESEARCH_ROUTE = [
@@ -73,7 +74,8 @@ ACTION_DESCRIPTIONS = {
     "create_growing_zone": "Create a rice growing zone to establish renewable food production.",
     "build_starter_base": "Place legitimate construction blueprints for a roofable shelter, beds, dining, cooking and a simple research bench.",
     "configure_food_bills": "Add sustainable simple-meal and butchering bills to completed work tables.",
-    "advance_research": "Select the next available project on the route toward fabrication and starflight.",
+    "advance_research": "Select the next available project on the default route toward fabrication and starflight.",
+    "advance_doctrine_research": "Let Laya choose one currently available research project whose live definition advances the selected economy, technology, defense or endgame direction.",
     "build_power": "Place blueprints for a wood generator, battery, lighting and conduits.",
     "build_hitech_lab": "Place blueprints for a hi-tech research bench and multi-analyzer.",
     "build_fabrication": "Place a fabrication bench needed for advanced components.",
@@ -164,6 +166,7 @@ ACTION_LABELS = {
     "build_starter_base": "жилой блок",
     "configure_food_bills": "рецепты еды",
     "advance_research": "новое исследование",
+    "advance_doctrine_research": "исследование по доктрине",
     "build_power": "электросеть",
     "build_hitech_lab": "лаборатория",
     "build_fabrication": "станок компонентов",
@@ -805,6 +808,7 @@ def collect_development(client: bridge.RimApiClient, snapshot: dict[str, Any]) -
     zones_raw = bridge.safe_get(client, "/api/v1/map/zones", warnings, map_id=map_id) or {}
     finished_raw = bridge.safe_get(client, "/api/v1/research/finished", warnings) or {}
     current = bridge.safe_get(client, "/api/v1/research/progress", warnings) or {}
+    research_tree_raw = bridge.safe_get(client, "/api/v1/research/tree", warnings) or {}
     work_tables = bridge.safe_get(client, "/api/v1/map/work-tables", warnings, map_id=map_id) or []
     forbidden = bridge.safe_get(client, "/api/v1/things/forbidden", warnings, map_id=map_id) or []
     things = bridge.safe_get(client, "/api/v1/map/things", warnings, map_id=map_id) or []
@@ -823,6 +827,7 @@ def collect_development(client: bridge.RimApiClient, snapshot: dict[str, Any]) -
     work_types = bridge.safe_get(client, "/api/v1/work-list/details", warnings) or []
     building_catalog = bridge.safe_get(client, "/api/v1/buildings/catalog", warnings) or []
     royalty = bridge.safe_get(client, "/api/v1/colony/royalty", warnings) or {}
+    active_mods = bridge.safe_get(client, "/api/v1/mods/list", warnings) or []
     tile_id = snapshot.get("map", {}).get("tile_id")
     tile_details = bridge.safe_get(client, "/api/v1/world/tile/details", warnings, id=int(tile_id)) if tile_id is not None else {}
     zones = zones_raw.get("zones", []) if isinstance(zones_raw, dict) else []
@@ -847,6 +852,7 @@ def collect_development(client: bridge.RimApiClient, snapshot: dict[str, Any]) -
         "zones": zones,
         "finished_research": finished,
         "current_research": current,
+        "research_tree": research_tree_raw.get("projects", []) if isinstance(research_tree_raw, dict) else [],
         "work_tables": work_tables,
         "forbidden": forbidden,
         "things": things,
@@ -870,6 +876,7 @@ def collect_development(client: bridge.RimApiClient, snapshot: dict[str, Any]) -
         "building_catalog": building_catalog if isinstance(building_catalog, list) else [],
         "building_catalog_summary": architect.summarize_catalog(building_catalog if isinstance(building_catalog, list) else []),
         "royalty": royalty if isinstance(royalty, dict) else {},
+        "active_mods": active_mods if isinstance(active_mods, list) else [],
     }
     snapshot["development"]["profession_context"] = professions.profession_context(
         snapshot.get("colonists", []), snapshot["development"]["work_types"]
@@ -1179,6 +1186,7 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
         and lowest_food >= 0.30
         and not any(c.get("downed") for c in snapshot["colonists"])
     )
+    current_doctrine = map_state.get("doctrine") or {}
     profession_context = dev.get("profession_context") or professions.profession_context(
         snapshot.get("colonists", []), dev.get("work_types") or []
     )
@@ -1211,26 +1219,38 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
     if "Fabrication" in finished and counts.get("FabricationBench", 0) == 0 and "fabrication" not in map_state["issued"]:
         one_time.append("build_fabrication")
     ship_ready = all(name in finished for name in RESEARCH_ROUTE[6:])
-    if ship_ready and counts.get("Ship_ComputerCore", 0) == 0 and "ship" not in map_state["issued"]:
+    chosen_endgame = str(current_doctrine.get("endgame") or "ship_escape")
+    if ship_ready and chosen_endgame == "ship_escape" and counts.get("Ship_ComputerCore", 0) == 0 and "ship" not in map_state["issued"]:
         one_time.append("build_ship")
     if survival_stable and current.lower() == "none":
-        target = next_research(client, finished, map_state)
-        if target:
-            one_time.append("advance_research")
-            details["research_target"] = target
+        doctrine_research = strategy.doctrine_research_candidates(
+            current_doctrine, dev.get("research_tree") or []
+        ) if current_doctrine else {}
+        if doctrine_research:
+            details["doctrine_research_options"] = doctrine_research
+            dev["doctrine_research_options"] = doctrine_research
+            one_time.append("advance_doctrine_research")
+        else:
+            target = next_research(client, finished, map_state)
+            if target:
+                one_time.append("advance_research")
+                details["research_target"] = target
     anchor = map_state.get("anchor") or {"x": 125, "z": 125}
     weather = dev.get("weather") or {}
     outdoor_temperature = float(weather.get("temperature") or 0.0)
     climate_mode = "cold" if outdoor_temperature < 8 else "hot" if outdoor_temperature > 30 else "temperate"
     material_options = structure_material_options(item_counts)
     mountain_rect = mining_bedroom_rect(dev.get("ores") or {}, anchor)
-    current_doctrine = map_state.get("doctrine") or {}
     chosen_material = str(current_doctrine.get("material") or "")
     chosen_material_available = int(item_counts.get(chosen_material) or 0) if chosen_material else 0
-    doctrine_due = not current_doctrine or tick - int(map_state.get("doctrine_tick") or -999999) >= 3600000
+    doctrine_due = (
+        not current_doctrine
+        or int(current_doctrine.get("schema_version") or 1) < 2
+        or tick - int(map_state.get("doctrine_tick") or -999999) >= 3600000
+    )
     doctrine_starved = bool(current_doctrine and chosen_material and chosen_material_available < 125 and material_options)
     if survival_stable and (doctrine_due or doctrine_starved):
-        details["doctrine_context"] = {
+        doctrine_context = {
             "current": current_doctrine,
             "material_options": material_options,
             "mountain_possible": mountain_rect is not None,
@@ -1239,7 +1259,15 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
             "boom_animals_nearby": sum(1 for a in snapshot.get("wild_animals", []) if "boom" in str(a.get("def") or "").lower()),
             "ores": {name: len((group or {}).get("cells") or []) for name, group in (dev.get("ores", {}).get("ores") or {}).items()},
             "profession_directions": profession_context.get("directions") or {},
+            "profession_choices": professions.direction_choice_descriptions(profession_context),
+            "building_catalog": dev.get("building_catalog") or [],
+            "research_tree": dev.get("research_tree") or [],
+            "active_mods": dev.get("active_mods") or [],
+            "ideology": dev.get("ideology") or {},
+            "royalty": dev.get("royalty") or {},
         }
+        doctrine_context["direction_audit"] = strategy.audit_directions(doctrine_context)
+        details["doctrine_context"] = doctrine_context
         dev["doctrine_context"] = details["doctrine_context"]
         one_time.append("choose_colony_doctrine")
 
@@ -1386,11 +1414,19 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
             one_time.append("build_weapon_shelves")
 
     military_focus = str(current_doctrine.get("military") or "balanced")
+    armament_focus = {
+        "ranged_firepower": "weapons", "turret_mortar": "weapons",
+        "melee_chokepoints": "armor", "fortified_depth": "balanced",
+        "mobile_response": "balanced", "peaceful_deterrence": "balanced",
+        "psychic_force": "balanced", "mechanized_force": "balanced",
+        "anomaly_weapons": "weapons", "gravship_security": "balanced",
+    }.get(military_focus, military_focus)
     if survival_stable and current_doctrine and not issued_recently(map_state, "armament", tick, retry_ticks=60000):
         underarmed = sum(1 for p in snapshot.get("combat", {}).get("colonists", []) if not p.get("has_ranged_weapon"))
-        if underarmed or military_focus in {"weapons", "armor", "balanced"}:
+        if underarmed or armament_focus in {"weapons", "armor", "balanced"}:
             details["armament_context"] = {
-                "focus": military_focus,
+                "focus": armament_focus,
+                "doctrine": military_focus,
                 "unarmed_colonists": underarmed,
                 "loose_weapons": snapshot.get("combat", {}).get("available_weapons", [])[:12],
                 "steel": item_counts.get("Steel", 0),
@@ -1646,7 +1682,7 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
     # needs are stable. The choice controls later infrastructure and research,
     # but is deliberately revisited after one in-game year rather than permanent.
     strategy_tick = int(map_state.get("income_strategy_tick") or -999999)
-    if survival_stable and (not map_state.get("income_strategy") or tick - strategy_tick >= 3600000):
+    if survival_stable and not current_doctrine and (not map_state.get("income_strategy") or tick - strategy_tick >= 3600000):
         one_time.extend([
             "income_drugs",
             "income_tailoring",
@@ -1719,15 +1755,28 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
         dev["construction_project_options"] = projects
         one_time.append("prioritize_construction_project")
     item_counts = dev.get("item_counts", {})
-    if survival_stable and int(item_counts.get("WoodLog") or 0) >= 180 and "killbox" not in map_state["issued"]:
+    defense_styles = {
+        "fortified_depth": {"killbox", "fallback", "turret", "mortar", "firefoam"},
+        "mobile_response": {"fallback", "firefoam"},
+        "ranged_firepower": {"fallback", "turret", "mortar", "firefoam"},
+        "melee_chokepoints": {"killbox", "fallback", "firefoam"},
+        "turret_mortar": {"fallback", "turret", "mortar", "firefoam"},
+        "peaceful_deterrence": {"fallback", "firefoam"},
+        "psychic_force": {"fallback", "firefoam"},
+        "mechanized_force": {"fallback", "turret", "firefoam"},
+        "anomaly_weapons": {"fallback", "firefoam"},
+        "gravship_security": {"fallback", "turret", "firefoam"},
+    }
+    allowed_defenses = defense_styles.get(str(current_doctrine.get("military") or ""), {"killbox", "fallback", "turret", "mortar", "firefoam"})
+    if survival_stable and "killbox" in allowed_defenses and int(item_counts.get("WoodLog") or 0) >= 180 and "killbox" not in map_state["issued"]:
         one_time.append("build_killbox")
-    if survival_stable and int(item_counts.get("WoodLog") or 0) >= 100 and "fallback_defense" not in map_state["issued"]:
+    if survival_stable and "fallback" in allowed_defenses and int(item_counts.get("WoodLog") or 0) >= 100 and "fallback_defense" not in map_state["issued"]:
         one_time.append("build_fallback_defense")
-    if "GunTurrets" in finished and int(item_counts.get("Steel") or 0) >= 220 and int(item_counts.get("ComponentIndustrial") or 0) >= 6 and "turret_defense" not in map_state["issued"]:
+    if "turret" in allowed_defenses and "GunTurrets" in finished and int(item_counts.get("Steel") or 0) >= 220 and int(item_counts.get("ComponentIndustrial") or 0) >= 6 and "turret_defense" not in map_state["issued"]:
         one_time.append("build_turret_defense")
-    if "Mortars" in finished and int(item_counts.get("Steel") or 0) >= 120 and int(item_counts.get("ReinforcedBarrel") or 0) >= 1 and "mortar_post" not in map_state["issued"]:
+    if "mortar" in allowed_defenses and "Mortars" in finished and int(item_counts.get("Steel") or 0) >= 120 and int(item_counts.get("ReinforcedBarrel") or 0) >= 1 and "mortar_post" not in map_state["issued"]:
         one_time.append("build_mortar_post")
-    if "Firefoam" in finished and int(item_counts.get("Steel") or 0) >= 75 and "firefoam_defense" not in map_state["issued"]:
+    if "firefoam" in allowed_defenses and "Firefoam" in finished and int(item_counts.get("Steel") or 0) >= 75 and "firefoam_defense" not in map_state["issued"]:
         one_time.append("build_firefoam_defense")
     mech_remains = [
         row for row in dev.get("things", [])
@@ -1876,7 +1925,7 @@ def build_decision_state(snapshot: dict[str, Any]) -> dict[str, Any]:
         })
     dev = snapshot.get("development", {})
     return {
-        "goal": "Self-sufficient colony, starship, leave planet.",
+        "goal": "A self-sufficient colony pursuing its saved doctrine and chosen long-term ending.",
         "colony": {"date": snapshot.get("game", {}).get("date"), "wealth": snapshot.get("game", {}).get("wealth"), "population": len(people), "threats": snapshot.get("map", {}).get("enemies")},
         "resources": snapshot.get("map", {}).get("resources", {}),
         "people": people,
@@ -1888,6 +1937,7 @@ def build_decision_state(snapshot: dict[str, Any]) -> dict[str, Any]:
             "human_corpses": len(corpse_rows(snapshot, "CorpsesHumanlike")), "animal_corpses": len(corpse_rows(snapshot, "CorpsesAnimal")),
             "corpse_context": dev.get("corpse_context"), "organ_context": dev.get("organ_context"),
             "trade_goods_value": dev.get("trade_value", 0), "income_strategy": dev.get("income_strategy"), "doctrine": dev.get("doctrine"),
+            "doctrine_audit": dev.get("doctrine_audit"), "active_mods": dev.get("active_mods", []),
             "weather": dev.get("weather"), "growing_period": (dev.get("tile_details") or {}).get("growing_period"),
             "rooms": [{"id": r.get("id"), "role": r.get("role_label"), "cleanliness": r.get("cleanliness"), "impressiveness": r.get("impressiveness"), "temperature": r.get("temperature"), "average_glow": r.get("average_glow"), "dark_percent": r.get("dark_cells_percent")} for r in dev.get("rooms", []) if not r.get("touches_map_edge")][:20],
             "storage_utilization_percent": (dev.get("storage") or {}).get("utilization_percent", 0),
@@ -1949,6 +1999,12 @@ def subchoice_questions_for_action(action: str, snapshot: dict[str, Any]) -> dic
             "type": "choice",
             "instructions": "Choose the function of the next building first. Layout, size and furniture are asked only after this program is selected.",
             "criteria": dict(dev["architecture_program_options"]),
+        }
+    elif action == "advance_doctrine_research" and dev.get("doctrine_research_options"):
+        q["doctrine_research_target"] = {
+            "type": "choice",
+            "instructions": "Choose one currently startable project that best advances the saved doctrine. Only live ResearchProjectDefs are listed.",
+            "criteria": dict(dev["doctrine_research_options"]),
         }
     elif action == "improve_room_lighting" and dev.get("dark_room_options"):
         q["lighting_room"] = {
@@ -2036,26 +2092,9 @@ def subchoice_questions_for_action(action: str, snapshot: dict[str, Any]) -> dic
         skill = "Construction" if action == "prioritize_construction" else "Hauling"
         q["worker_pawn"] = {"type": "choice", "instructions": "Choose the exact colonist. Corpse-tolerant traits reduce mood cost; injuries and missing limbs reduce throughput.", "criteria": worker_criteria(snapshot, skill)}
     elif action == "choose_colony_doctrine" and dev.get("doctrine_context"):
-        d = dev["doctrine_context"]
-        forms = {"separate_houses": "Private houses", "compact": "Compact connected base", "courtyard": "Courtyard settlement"}
-        if d.get("mountain_possible"): forms["mountain"] = "Mountain base: fireproof/defensible but slow and infestation-prone"
-        q.update({
-            "doctrine_settlement_form": {"type": "choice", "instructions": "Choose future settlement form; existing buildings stay.", "criteria": forms},
-            "doctrine_material": {"type": "choice", "instructions": "Choose future building material from sufficient reserves.", "criteria": dict(d.get("material_options") or {})},
-            "doctrine_diplomacy": {"type": "choice", "instructions": "Choose external posture.", "criteria": {"peaceful_trade": "Trade/alliance first", "defensive": "Defend and raid only for advantage", "expansionist": "Actively evaluate raids and expeditions"}},
-            "doctrine_military": {"type": "choice", "instructions": "Choose military investment.", "criteria": {"weapons": "Weapons", "armor": "Armor", "fortifications": "Layered fortifications", "balanced": "Balanced"}},
-            "doctrine_economy": {"type": "choice", "instructions": "Choose long-term cash engine.", "criteria": {"drugs": "Drugs", "tailoring": "Apparel", "art": "Sculptures", "livestock": "Animals/products", "biofuel": "Chemfuel", "mining": "Minerals", "crops": "Surplus crops", "brewing": "Beer", "travel_food": "Caravan food", "orbital": "Orbital trade", "organs": "Prisoner organs with medical/social costs"}},
-            "doctrine_beauty": {"type": "choice", "instructions": "Choose where beauty matters first.", "criteria": {"shared_first": "Dining/rec", "bedrooms_first": "Bedrooms", "hospital_work_first": "Hospital/work", "balanced": "Weakest valuable room"}},
-        })
-        direction_descriptions = professions.direction_choice_descriptions({
-            "directions": d.get("profession_directions") or {}
-        })
-        if direction_descriptions:
-            q["doctrine_specialization"] = {
-                "type": "choice",
-                "instructions": "Choose a strategic direction that the actual colonists can support. Skills, passion flames and disabled work matter more than a generic ideal build.",
-                "criteria": direction_descriptions,
-            }
+        # Doctrine uses its own conditional cascade in choose_action: broad
+        # domain -> exact direction -> compatible axes -> economy product.
+        return {}
     return {name: question for name, question in q.items() if question.get("criteria")}
 
 
@@ -2092,38 +2131,36 @@ def choose_action(agent: Any, snapshot: dict[str, Any], candidates: list[str]) -
         action_answer = {"choice": choice, "confidence": 1.0, "probabilities": {choice: 1.0}}
         mode = "single_feasible_action"
     else:
-        action_question = {"colony_goal_action": {"type": "choice", "instructions": "Choose the next concrete feasible action for survival and eventual starflight. Parameters of unchosen actions will not be asked.", "criteria": {name: action_description(name, snapshot) for name in considered}}}
+        action_question = {"colony_goal_action": {"type": "choice", "instructions": "Choose the next concrete feasible action for survival and the saved long-term doctrine. Parameters of unchosen actions will not be asked.", "criteria": {name: action_description(name, snapshot) for name in considered}}}
         raw_action = agent.predict(state, action_question)
         action_answer = raw_action.get("answers", {}).get("colony_goal_action", {})
         choice = str(action_answer.get("choice") or "")
         if choice not in considered: choice = considered[0]
         mode = "hierarchical"
 
-    detail_questions = subchoice_questions_for_action(choice, snapshot)
-    raw_details = agent.predict(state, detail_questions) if detail_questions else None
     parsed: dict[str, Any] = {}
     merged_answers = {"colony_goal_action": action_answer}
-    if raw_details:
-        merged_answers.update(raw_details.get("answers", {}))
-        for question_id, question in detail_questions.items():
-            selected = str(raw_details.get("answers", {}).get(question_id, {}).get("choice") or "")
-            if selected not in question["criteria"]:
-                continue
-            if question_id in {"tame_target", "hunt_target", "worker_pawn", "construction_project", "night_owl_pawn"}:
-                parsed[question_id] = int(selected)
-            else:
-                parsed[question_id] = selected
-
-    if choice == "choose_colony_doctrine" and parsed.get("doctrine_economy") == "mining":
-        ores = (snapshot.get("development", {}).get("doctrine_context") or {}).get("ores") or {}
-        mining = {str(name): f"{count} visible cells" for name, count in ores.items() if int(count or 0) > 0 and any(t in str(name).lower() for t in ("gold", "silver", "jade", "uranium", "plasteel", "steel"))}
-        if mining:
-            third_question = {"doctrine_mining_product": {"type": "choice", "instructions": "Mining was selected; now choose the actual surplus mineral target.", "criteria": mining}}
-            third = agent.predict(state, third_question)
-            selected = str(third.get("answers", {}).get("doctrine_mining_product", {}).get("choice") or "")
-            if selected in mining: parsed["doctrine_mining_product"] = selected
-            merged_answers.update(third.get("answers", {}))
-            if raw_details is None: raw_details = {"answers": {}}
+    if choice == "choose_colony_doctrine":
+        cascade = strategy.choose_cascaded_doctrine(
+            agent, state, snapshot.get("development", {}).get("doctrine_context") or {}
+        )
+        parsed["doctrine_selection"] = cascade["selection"]
+        parsed["doctrine_direction_audit"] = cascade["audit"]
+        merged_answers.update(cascade["answers"])
+        raw_details: dict[str, Any] | None = {"mode": "cascaded", "steps": cascade["raw_steps"]}
+    else:
+        detail_questions = subchoice_questions_for_action(choice, snapshot)
+        raw_details = agent.predict(state, detail_questions) if detail_questions else None
+        if raw_details:
+            merged_answers.update(raw_details.get("answers", {}))
+            for question_id, question in detail_questions.items():
+                selected = str(raw_details.get("answers", {}).get(question_id, {}).get("choice") or "")
+                if selected not in question["criteria"]:
+                    continue
+                if question_id in {"tame_target", "hunt_target", "worker_pawn", "construction_project", "night_owl_pawn"}:
+                    parsed[question_id] = int(selected)
+                else:
+                    parsed[question_id] = selected
 
     if choice == "plan_architecture" and parsed.get("architecture_program"):
         program = str(parsed["architecture_program"])
@@ -2216,6 +2253,16 @@ def publish_overlay(
         for a in snapshot.get("animals", [])[:3]
     ) or "нет"
     corpses = snapshot.get("development", {}).get("corpses", [])
+    doctrine_lines: list[str] = []
+    doctrine = decision.get("doctrine_selection") or snapshot.get("development", {}).get("doctrine") or {}
+    if doctrine:
+        labels = doctrine.get("labels") or strategy.doctrine_labels(doctrine)
+        doctrine_lines = [
+            "",
+            f"Курс: {labels.get('primary_direction', '—')} | финал: {labels.get('endgame', '—')}",
+            f"Экономика: {labels.get('economy', '—')} | технологии: {labels.get('technology', '—')}",
+            f"Оборона: {labels.get('military', '—')} | общество: {labels.get('society', '—')}",
+        ]
     text = "\n".join(
         [
             "LAYA — автономный директор",
@@ -2226,6 +2273,7 @@ def publish_overlay(
             "",
             "Варианты этого цикла:",
             *option_lines,
+            *doctrine_lines,
             "",
             f"Выбрано: {action_label(choice, snapshot)}",
         ]
@@ -2471,21 +2519,28 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
         return {"applied": True, "transition": plan, "old_retained": True, "response": response}
 
     if choice == "choose_colony_doctrine":
-        doctrine = {
-            "settlement_form": details.get("doctrine_settlement_form") or "compact",
-            "material": details.get("doctrine_material") or "WoodLog",
-            "diplomacy": details.get("doctrine_diplomacy") or "defensive",
-            "military": details.get("doctrine_military") or "balanced",
-            "economy": details.get("doctrine_economy") or "crops",
-            "mining_product": details.get("doctrine_mining_product"),
-            "beauty": details.get("doctrine_beauty") or "shared_first",
-            "specialization": details.get("doctrine_specialization") or "food_agriculture",
-        }
+        doctrine = dict(details.get("doctrine_selection") or {})
+        if not doctrine:
+            return {"applied": False, "reason": "The cascaded doctrine selection is incomplete"}
         map_state["doctrine"] = doctrine
+        map_state["doctrine_audit"] = {
+            "coverage": (details.get("doctrine_direction_audit") or {}).get("coverage", {}),
+            "expansions": (details.get("doctrine_direction_audit") or {}).get("expansions", {}),
+            "available_directions": list((details.get("doctrine_direction_audit") or {}).get("available", {})),
+            "unavailable_directions": {
+                name: row.get("reason") for name, row in (details.get("doctrine_direction_audit") or {}).get("unavailable", {}).items()
+            },
+        }
         map_state["doctrine_tick"] = tick
-        map_state["income_strategy"] = doctrine["economy"]
+        map_state["income_strategy"] = strategy.legacy_income(doctrine)
+        map_state["income_strategy_tick"] = tick
         issued["doctrine"] = tick
-        return {"applied": True, "doctrine": doctrine, "note": "Existing buildings remain unchanged."}
+        return {
+            "applied": True,
+            "doctrine": doctrine,
+            "audit": map_state["doctrine_audit"],
+            "note": "Existing buildings remain unchanged; the doctrine affects only future research, projects and priorities.",
+        }
     if choice == "build_private_bedroom":
         material = str(details.get("bedroom_material") or (map_state.get("doctrine") or {}).get("material") or "WoodLog")
         room_count = sum(1 for r in snapshot["development"].get("rooms", []) if "bedroom" in str(r.get("role_label") or "").lower())
@@ -2914,6 +2969,13 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
         result = client.post("/api/v1/research/target", query={"name": target, "force": False})
         issued[f"research:{target}"] = tick
         return result
+    if choice == "advance_doctrine_research":
+        target = str(details.get("doctrine_research_target") or "")
+        if target not in (details.get("doctrine_research_options") or {}):
+            return {"applied": False, "reason": "Laya did not select a live doctrine research project"}
+        result = client.post("/api/v1/research/target", query={"name": target, "force": False})
+        issued[f"research:{target}"] = tick
+        return {"applied": True, "target": target, "doctrine": map_state.get("doctrine"), "response": result}
     if choice == "build_power":
         result = post_blueprint(client, map_id, anchor, power_blueprint(), dx=1, dz=13)
         issued["power"] = tick
@@ -3313,6 +3375,7 @@ def run_development_cycle(client: bridge.RimApiClient, agent: Any, state: dict[s
     snapshot["development"]["income_strategy"] = map_state.get("income_strategy")
     snapshot["development"]["prisoner_plans"] = map_state.get("prisoner_plans", {})
     snapshot["development"]["doctrine"] = map_state.get("doctrine", {})
+    snapshot["development"]["doctrine_audit"] = map_state.get("doctrine_audit", {})
     if "anchor" not in map_state or "growing_anchor" not in map_state:
         center = anchor_from_snapshot(snapshot)
         terrain = client.get("/api/v1/map/terrain", map_id=snapshot["map"]["id"])
@@ -3336,7 +3399,8 @@ def run_development_cycle(client: bridge.RimApiClient, agent: Any, state: dict[s
         "doctrine_beauty", "doctrine_specialization", "sculpture_install_plan", "animal_barn_material",
         "animal_barn_floor", "architecture_program", "architecture_house_style",
         "architecture_variant", "lighting_room", "skill_training_plan",
-        "night_owl_pawn", "workbench_upgrade",
+        "night_owl_pawn", "workbench_upgrade", "doctrine_selection",
+        "doctrine_direction_audit", "doctrine_research_target",
     ):
         if decision.get(key) is not None:
             details[key] = decision[key]
@@ -3348,7 +3412,7 @@ def run_development_cycle(client: bridge.RimApiClient, agent: Any, state: dict[s
     record = {
         "timestamp": bridge.utc_now(),
         "mode": "colony-director",
-        "goal": "starflight",
+        "goal": str((map_state.get("doctrine") or {}).get("endgame") or "self-sufficient_colony"),
         "map_seed": seed,
         "anchor": map_state["anchor"],
         "candidates": candidates,
@@ -3908,7 +3972,7 @@ def main() -> int:
     last_combat_record: dict[str, Any] | None = None
     next_colony_cycle = 0.0
     next_downed_cycle = 0.0
-    print("Laya colony director active: survival -> research -> starship. Ctrl+C stops safely.", flush=True)
+    print("Laya colony director active: survival -> doctrine -> chosen endgame. Ctrl+C stops safely.", flush=True)
     try:
         while True:
             started = time.monotonic()

@@ -25,6 +25,20 @@ RIMAPI snapshot
 
 Hunting, taming, wild harvesting, flooring, paths, doctrine, sculpture placement, temples, construction projects, trade and combat rosters therefore have conditional parameter stages. A rejected branch cannot accidentally select or execute one of its targets.
 
+Long-term strategy has its own content-aware cascade:
+
+```text
+active package IDs + live research/building/work catalogues + workforce fit
+  -> broad strategic domain
+  -> one compatible archetype
+  -> settlement/economy/technology/defense/society/endgame axes
+  -> product inside the chosen economy family
+  -> mineral only when that product is mining
+  -> saved versioned doctrine
+```
+
+`colony_strategy.py` owns the audited Core/DLC catalogue. It filters inactive expansion mechanics before inference and turns the saved doctrine into live research, architecture and fortification candidates. `DIRECTION_AUDIT.md` records the coverage boundary and official sources.
+
 Combat follows its own hierarchy:
 
 ```text

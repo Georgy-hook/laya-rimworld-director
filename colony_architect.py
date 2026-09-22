@@ -498,8 +498,11 @@ def program_options(context: dict[str, Any]) -> dict[str, str]:
     ideology = context.get("ideology") or {}
     storage = context.get("storage") or {}
     professions = context.get("professions") or {}
-    chosen_direction = str((context.get("doctrine") or {}).get("specialization") or "")
+    doctrine = context.get("doctrine") or {}
+    chosen_direction = str(doctrine.get("specialization") or "")
     direction_buildings = set(((professions.get("directions") or {}).get(chosen_direction) or {}).get("building_programs") or [])
+    direction_buildings.update(map(str, doctrine.get("building_programs") or []))
+    strategic_direction = str(doctrine.get("primary_direction") or chosen_direction)
     private_rooms = sum(1 for room in rooms if "bedroom" in str(room.get("role_label") or "").lower() and not room.get("is_prison_cell"))
     medical_beds = sum(1 for row in context.get("buildings") or [] if row.get("medical"))
     patient_count = len(context.get("potential_patients") or [])
@@ -548,7 +551,7 @@ def program_options(context: dict[str, Any]) -> dict[str, str]:
     # need is already satisfied.
     for program in direction_buildings:
         if program in PROGRAM_CATALOG:
-            options.setdefault(program, f"Supports chosen profession direction {chosen_direction}: {PROGRAM_CATALOG[program]['label']}")
+            options.setdefault(program, f"Supports chosen strategic/workforce direction {strategic_direction}: {PROGRAM_CATALOG[program]['label']}")
     return options
 
 
