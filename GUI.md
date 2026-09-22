@@ -15,7 +15,7 @@ The 0.0.2 RimWorld Autopilot control center is intentionally separate from the c
 2. **Strategy** — the selected doctrine and every direction available in the loaded Core/DLC set.
 3. **Priorities** — eight 0–100 preference weights, a free-form personal note and explicit peaceful/safety boundaries.
 4. **History** — friendly explanations by default; exact JSON is available only after enabling technical mode.
-5. **Settings** — Russian/English switch with real flag assets, diagnostic logging, standard Windows uninstall and exports.
+5. **Settings** — Russian/English switch with real flag assets, diagnostic logging, compact/hidden in-game HUD controls, standard Windows uninstall and exports.
 
 The interface uses native Tk widgets and the standard library. It therefore adds no UI framework dependency to the already large local-model installation. Rounded cards, animated buttons and orbit particles are drawn locally. The 1240×800 minimum size protects the decision-boundary controls, while long pages remain vertically scrollable. History and page scrollbars use a compact rounded track with keyboard support instead of legacy arrow controls. Buttons expose keyboard focus and Enter/Space activation.
 
@@ -28,6 +28,10 @@ The GUI writes `autopilot-preferences.json`. Installed builds keep writable sett
 Weights guide ordering and model context. They cannot override emergency gates, missing research/resources, invalid targets or API safety checks. “Do not begin unprovoked attacks” additionally removes settlement raids from the feasible candidate set.
 
 Normal logging keeps compact decisions, outcomes and probability paths. Technical logging additionally records the complete development snapshot/details; combat logging keeps full snapshots only in technical mode.
+
+The director writes a separate UTC heartbeat with its PID and current state. The GUI reports loading, waiting for a colony, running, decision errors and an unresponsive process independently; an old but still-live PID can no longer masquerade as a healthy autopilot. The HUD preference is read on every publication, so hiding it takes effect without stopping Laya. Compact mode renders a smaller RimWorld panel with up to five yellow probability bars.
+
+All calls into the Laya decision model pass through one guard. Questions with exactly one feasible answer are accepted deterministically and recorded with probability 1.0 without invoking the model; questions with no feasible answer are rejected as planner errors. Laya therefore receives only genuine decisions with at least two alternatives.
 
 ## Installer and uninstaller
 

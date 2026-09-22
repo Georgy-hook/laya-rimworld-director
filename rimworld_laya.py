@@ -819,12 +819,90 @@ def print_json(value: Any) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2, default=str))
 
 
+class SafeDecisionAgent:
+    """Never send a meaningless single-option question into Laya.
+
+    Laya's decision head compares alternatives and requires at least two marker
+    positions. A one-option question is not a decision, so it is resolved
+    deterministically here while every genuine choice still goes to the model.
+    Keeping this guard around the loaded agent protects every current and future
+    caller, including nested event, combat and architecture questions.
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self.inner = inner
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.inner, name)
+
+    @staticmethod
+    def _options(question: dict[str, Any]) -> list[Any]:
+        kind = str(question.get("type") or "")
+        criteria = question.get("criteria")
+        if kind == "choice":
+            if isinstance(criteria, dict):
+                return list(criteria)
+            if isinstance(criteria, list):
+                return list(criteria)
+        if kind == "score" and isinstance(criteria, list):
+            return list(range(len(criteria)))
+        return []
+
+    @staticmethod
+    def _deterministic_answer(question: dict[str, Any], option: Any) -> dict[str, Any]:
+        if question.get("type") == "score":
+            criteria = list(question.get("criteria") or [])
+            return {
+                "type": "score",
+                "score": 0.0,
+                "legend": {str(index): value for index, value in enumerate(criteria)},
+                "probabilities": {"0": 1.0},
+                "confidence": 1.0,
+                "action": {"act_probability": 1.0},
+                "resolved_without_model": True,
+            }
+        return {
+            "type": "choice",
+            "choice": str(option),
+            "probabilities": {str(option): 1.0},
+            "confidence": 1.0,
+            "action": {"act_probability": 1.0},
+            "resolved_without_model": True,
+        }
+
+    def predict(self, state: Any, questions: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        model_questions: dict[str, dict[str, Any]] = {}
+        answers: dict[str, Any] = {}
+        for question_id, question in questions.items():
+            options = self._options(question)
+            if question.get("type") in {"choice", "score"} and not options:
+                raise ValueError(f"Decision question {question_id!r} has no feasible options")
+            if len(options) == 1:
+                answers[question_id] = self._deterministic_answer(question, options[0])
+            else:
+                model_questions[question_id] = question
+
+        model_result: dict[str, Any] = {}
+        if model_questions:
+            model_result = self.inner.predict(state, model_questions)
+            answers.update(model_result.get("answers") or {})
+        usage = dict(model_result.get("usage") or {})
+        usage.setdefault("input_tokens", 0)
+        usage.setdefault("output_tokens", 0)
+        return {
+            **model_result,
+            "model": model_result.get("model") or "laya-deterministic-guard",
+            "answers": answers,
+            "usage": usage,
+        }
+
+
 def load_agent(model: str, device: str) -> Any:
     import laya
 
     selected = None if device == "auto" else device
     print(f"Loading Laya model {model!r} on {selected or 'auto'}...", flush=True)
-    return laya.load(model, device=selected)
+    return SafeDecisionAgent(laya.load(model, device=selected))
 
 
 def run_cycle(

@@ -25,6 +25,17 @@ class PreferenceTests(unittest.TestCase):
             self.assertEqual(loaded["priorities"]["research"], 0)
             self.assertTrue(loaded["safety"]["avoid_unprovoked_attacks"])
 
+    def test_overlay_preferences_default_to_compact_and_can_be_hidden(self):
+        defaults = laya_preferences.load_preferences_from_value({})
+        self.assertTrue(defaults["overlay"]["enabled"])
+        self.assertTrue(defaults["overlay"]["compact"])
+        changed = laya_preferences.load_preferences_from_value({
+            "overlay": {"enabled": False, "compact": False, "max_options": 99},
+        })
+        self.assertFalse(changed["overlay"]["enabled"])
+        self.assertFalse(changed["overlay"]["compact"])
+        self.assertEqual(changed["overlay"]["max_options"], 8)
+
     def test_autopilot_preferences_use_product_name(self):
         with tempfile.TemporaryDirectory() as folder:
             self.assertEqual(

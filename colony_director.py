@@ -5,6 +5,7 @@ import ctypes
 import json
 import os
 import time
+import traceback
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -1697,7 +1698,7 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
             "income_orbital",
             "income_organs",
         ])
-    strategy = str(map_state.get("income_strategy") or "")
+    income_strategy = str(map_state.get("income_strategy") or "")
     strategy_tables = {
         "drugs": {"DrugLab"},
         "tailoring": {"HandTailoringBench", "ElectricTailoringBench"},
@@ -1712,23 +1713,23 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
         "brewing": "Brewing",
         "orbital": "MicroelectronicsBasics",
     }
-    required_research = strategy_research.get(strategy)
+    required_research = strategy_research.get(income_strategy)
     if (
-        strategy in {"drugs", "biofuel", "brewing", "orbital"}
+        income_strategy in {"drugs", "biofuel", "brewing", "orbital"}
         and (required_research is None or required_research in finished)
-        and not issued_recently(map_state, f"income_infrastructure:{strategy}", tick, retry_ticks=60000)
+        and not issued_recently(map_state, f"income_infrastructure:{income_strategy}", tick, retry_ticks=60000)
     ):
         present = any(
-            str(table.get("thing_def") or "") in strategy_tables.get(strategy, set())
+            str(table.get("thing_def") or "") in strategy_tables.get(income_strategy, set())
             for table in dev.get("work_tables", [])
         )
-        if strategy == "orbital":
+        if income_strategy == "orbital":
             present = counts.get("CommsConsole", 0) > 0 and counts.get("OrbitalTradeBeacon", 0) > 0
         if not present:
             one_time.append("build_income_infrastructure")
-    if strategy in strategy_tables and any(
-        str(table.get("thing_def") or "") in strategy_tables[strategy] for table in dev.get("work_tables", [])
-    ) and not issued_recently(map_state, f"income_bills:{strategy}", tick, retry_ticks=30000):
+    if income_strategy in strategy_tables and any(
+        str(table.get("thing_def") or "") in strategy_tables[income_strategy] for table in dev.get("work_tables", [])
+    ) and not issued_recently(map_state, f"income_bills:{income_strategy}", tick, retry_ticks=30000):
         one_time.append("configure_income_production")
 
     ideology = dev.get("ideology") or {}
@@ -2218,6 +2219,62 @@ def choose_action(agent: Any, snapshot: dict[str, Any], candidates: list[str]) -
     return {"choice": choice, "confidence": bridge.first_number(action_answer.get("confidence"), 1.0), **parsed, "raw": raw}
 
 
+def probability_bars(
+    probabilities: dict[str, Any],
+    labels: dict[str, str],
+    selected: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    ranked = sorted(
+        ((str(name), bridge.first_number(value)) for name, value in probabilities.items()),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    visible = ranked[:limit]
+    if selected in probabilities and selected not in {name for name, _ in visible}:
+        visible = (visible[:-1] if visible else []) + [(selected, bridge.first_number(probabilities[selected]))]
+    return [
+        {
+            "label": str(labels.get(name) or name),
+            "value": max(0.0, min(1.0, value)),
+            "selected": name == selected,
+        }
+        for name, value in visible
+    ]
+
+
+def show_overlay(
+    client: bridge.RimApiClient,
+    *,
+    compact_lines: list[str],
+    full_lines: list[str],
+    bars: list[dict[str, Any]] | None = None,
+    duration: float = 12.0,
+    color: str = "#E8F4FF",
+) -> None:
+    overlay = laya_preferences.load_preferences().get("overlay") or {}
+    if not overlay.get("enabled", True):
+        client.post(
+            "/api/v1/ui/announce",
+            body={"text": "", "duration": 0.0, "color": color, "scale": 1.0, "panel": True, "compact": True, "bars": []},
+        )
+        return
+    compact = bool(overlay.get("compact", True))
+    max_options = max(3, min(8, int(overlay.get("max_options", 5))))
+    client.post(
+        "/api/v1/ui/announce",
+        body={
+            "text": "\n".join(compact_lines if compact else full_lines),
+            "duration": duration,
+            "color": color,
+            "scale": 1.0,
+            "panel": True,
+            "compact": compact,
+            "bars": list(bars or [])[:max_options],
+        },
+    )
+
+
 def publish_overlay(
     client: bridge.RimApiClient,
     snapshot: dict[str, Any],
@@ -2284,9 +2341,23 @@ def publish_overlay(
             f"Выбрано: {action_label(choice, snapshot)}",
         ]
     )
-    client.post(
-        "/api/v1/ui/announce",
-        body={"text": text, "duration": 12.0, "color": "#E8F4FF", "scale": 1.0, "panel": True},
+    bars = probability_bars(
+        probabilities,
+        {name: action_label(name, snapshot) for name in probabilities},
+        choice,
+        8,
+    )
+    show_overlay(
+        client,
+        compact_lines=[
+            "LAYA — автономный директор",
+            f"Еда: {resources.get('food', 0)} · враги: {snapshot['map']['enemies']}",
+            f"Выбрано: {action_label(choice, snapshot)}",
+        ],
+        full_lines=text.splitlines(),
+        bars=bars,
+        duration=12.0,
+        color="#E8F4FF",
     )
 
 
@@ -2311,9 +2382,18 @@ def publish_combat_overlay(client: bridge.RimApiClient, record: dict[str, Any], 
     lines.extend(["", f"Приказ: {record['action']['description']}"])
     if repeated:
         lines.append("Приказ уже выполняется; повторно не отправлен.")
-    client.post(
-        "/api/v1/ui/announce",
-        body={"text": "\n".join(lines), "duration": 12.0, "color": "#FFD7D7", "scale": 1.0, "panel": True},
+    show_overlay(
+        client,
+        compact_lines=[
+            "LAYA — БОЕВОЙ РЕЖИМ",
+            f"Противники: {len(snapshot['combat']['hostiles'])}",
+            f"Приказ: {record['action']['description']}",
+            *(["Приказ уже выполняется"] if repeated else []),
+        ],
+        full_lines=lines,
+        bars=probability_bars(probabilities, {name: name for name in probabilities}, choice, 8),
+        duration=12.0,
+        color="#FFD7D7",
     )
 
 
@@ -3560,7 +3640,15 @@ def publish_event_overlay(client: bridge.RimApiClient, event: dict[str, Any], op
         suffix = f" {float(score) * 100:.1f}%" if score is not None else ""
         lines.append(f"{'> ' if name == choice else '  '}{name}{suffix}")
     lines.extend(["", f"Решение: {choice}", f"Результат: {str(result)[:180]}"])
-    client.post("/api/v1/ui/announce", body={"text": "\n".join(lines), "duration": 15.0, "color": "#F3E6FF", "scale": 1.0, "panel": True})
+    event_label = str(event.get("label") or event.get("name") or event.get("def_name") or event.get("incident_def") or "Событие")
+    show_overlay(
+        client,
+        compact_lines=["LAYA — СОБЫТИЕ", event_label, f"Решение: {choice}"],
+        full_lines=lines,
+        bars=probability_bars(probabilities, {name: options.get(name, name) for name in options}, choice, 8),
+        duration=15.0,
+        color="#F3E6FF",
+    )
 
 
 def run_event_cycle(
@@ -3683,10 +3771,12 @@ def run_rescue_site_cycle(
         "status": status, "result": result,
     }
     try:
-        client.post("/api/v1/ui/announce", body={
-            "text": f"LAYA — СПАСАТЕЛЬНАЯ ОПЕРАЦИЯ\nЭтап: {phase}\nПленники: {', '.join(status.get('captive_names') or []) or 'освобождены'}",
-            "duration": 12.0, "color": "#CFFFE0", "scale": 1.0, "panel": True,
-        })
+        rescue_lines = [
+            "LAYA — СПАСАТЕЛЬНАЯ ОПЕРАЦИЯ",
+            f"Этап: {phase}",
+            f"Пленники: {', '.join(status.get('captive_names') or []) or 'освобождены'}",
+        ]
+        show_overlay(client, compact_lines=rescue_lines, full_lines=rescue_lines, duration=12.0, color="#CFFFE0")
     except bridge.RimApiError:
         pass
     save_state(state_path, state)
@@ -3941,7 +4031,18 @@ def run_ancient_danger_cycle(
         lines.append(f"{'> ' if name == choice else '  '}{name}{suffix}")
     lines.extend(["", f"Решение: {choice}", "Автопауза снята; колонисты не держатся мобилизованными из-за одного предупреждения."])
     try:
-        client.post("/api/v1/ui/announce", body={"text": "\n".join(lines), "duration": 16.0, "color": "#FFE5A8", "scale": 1.0, "panel": True})
+        show_overlay(
+            client,
+            compact_lines=[
+                "LAYA — ДРЕВНЯЯ ОПАСНОСТЬ",
+                f"Бойцы: {len(healthy)} · стрелки: {len(ranged)} · медицина: {resources.get('medicine', 0)}",
+                f"Решение: {choice}",
+            ],
+            full_lines=lines,
+            bars=probability_bars(probabilities, {name: name for name in criteria}, choice, 8),
+            duration=16.0,
+            color="#FFE5A8",
+        )
     except bridge.RimApiError:
         pass
     record = {
@@ -3966,7 +4067,21 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--state", type=Path, default=Path(__file__).with_name("logs") / "colony-state.json")
     p.add_argument("--log", type=Path, default=Path(__file__).with_name("logs") / "decisions.jsonl")
     p.add_argument("--pid-file", type=Path, default=Path(__file__).with_name("logs") / "director.pid")
+    p.add_argument("--runtime-status", type=Path, default=Path(__file__).with_name("logs") / "runtime-status.json")
     return p
+
+
+def write_runtime_status(path: Path, state: str, detail: str = "") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "pid": os.getpid(),
+        "state": state,
+        "detail": detail[:500],
+        "updated_at": bridge.utc_now(),
+    }
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    temporary.replace(path)
 
 
 def main() -> int:
@@ -3977,20 +4092,31 @@ def main() -> int:
         if ctypes.windll.kernel32.GetLastError() == 183:
             print("Another Laya colony director is already active; exiting duplicate process.", flush=True)
             return 2
-    client = bridge.RimApiClient(args.api_url)
-    agent = bridge.load_agent(args.model, args.device)
-    state = load_state(args.state)
     args.pid_file.parent.mkdir(parents=True, exist_ok=True)
     args.pid_file.write_text(str(os.getpid()), encoding="ascii")
+    write_runtime_status(args.runtime_status, "starting", "Loading the local Laya model")
+    client = bridge.RimApiClient(args.api_url)
+    try:
+        agent = bridge.load_agent(args.model, args.device)
+        state = load_state(args.state)
+    except Exception as exc:
+        write_runtime_status(args.runtime_status, "error", f"Model startup failed: {exc}")
+        raise
     last_wait_message = 0.0
     last_combat_signature: tuple[Any, ...] | None = None
     last_combat_record: dict[str, Any] | None = None
     next_colony_cycle = 0.0
     next_downed_cycle = 0.0
+    runtime_state = "running"
+    runtime_detail = "Ready for the next decision cycle"
     print("Laya colony director active: survival -> doctrine -> chosen endgame. Ctrl+C stops safely.", flush=True)
     try:
         while True:
             started = time.monotonic()
+            # Refresh the heartbeat without erasing a waiting/error state.  The
+            # GUI must not briefly claim that a failing director is healthy
+            # merely because another retry has started.
+            write_runtime_status(args.runtime_status, runtime_state, runtime_detail)
             try:
                 snapshot = bridge.collect_snapshot(client)
                 if snapshot["map"]["enemies"] > 0 or any(c.get("is_drafted") for c in snapshot["combat"]["colonists"]):
@@ -4077,18 +4203,37 @@ def main() -> int:
                         record = run_development_cycle(client, agent, state, args.state, args.log)
                         next_colony_cycle = now + args.interval
                         print(f"[{record['timestamp']}] colony: {record['decision']['choice']} | {record['result']}", flush=True)
+                runtime_state = "running"
+                runtime_detail = "Last decision cycle completed"
+                write_runtime_status(args.runtime_status, runtime_state, runtime_detail)
             except (bridge.RimApiError, OSError, ValueError, RuntimeError) as exc:
                 now = time.monotonic()
+                detail = str(exc)
+                waiting_for_map = "no loaded map" in detail.lower() or "load a colony" in detail.lower()
+                runtime_state = "waiting" if waiting_for_map else "error"
+                runtime_detail = detail
+                write_runtime_status(args.runtime_status, runtime_state, runtime_detail)
                 if now - last_wait_message >= 60:
-                    print(f"[{bridge.utc_now()}] Waiting for a loaded colony: {exc}", flush=True)
+                    prefix = "Waiting for a loaded colony" if waiting_for_map else "Decision cycle problem"
+                    print(f"[{bridge.utc_now()}] {prefix}: {exc}", flush=True)
                     last_wait_message = now
                 bridge.append_log(args.log, {"timestamp": bridge.utc_now(), "mode": "waiting", "error": repr(exc)})
+            except Exception as exc:
+                runtime_state = "error"
+                runtime_detail = f"Unexpected cycle error: {exc}"
+                write_runtime_status(args.runtime_status, runtime_state, runtime_detail)
+                traceback.print_exc()
+                bridge.append_log(args.log, {"timestamp": bridge.utc_now(), "mode": "error", "error": repr(exc)})
             elapsed = time.monotonic() - started
             time.sleep(max(0.0, 2.0 - elapsed))
     except KeyboardInterrupt:
         print("Stopped. No further commands will be sent.")
         return 0
     finally:
+        try:
+            write_runtime_status(args.runtime_status, "stopped", "Director stopped")
+        except OSError:
+            pass
         try:
             if args.pid_file.read_text(encoding="ascii").strip() == str(os.getpid()):
                 args.pid_file.unlink(missing_ok=True)

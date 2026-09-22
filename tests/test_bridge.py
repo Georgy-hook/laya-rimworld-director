@@ -49,6 +49,45 @@ class RosterAgent:
 
 
 class BridgeTests(unittest.TestCase):
+    def test_single_option_is_resolved_without_calling_laya(self):
+        class RecordingAgent:
+            def __init__(self):
+                self.calls = []
+
+            def predict(self, state, questions):
+                self.calls.append(questions)
+                return {
+                    "model": "fake",
+                    "answers": {
+                        "real_choice": {
+                            "choice": "second",
+                            "probabilities": {"first": 0.2, "second": 0.8},
+                            "confidence": 0.6,
+                        }
+                    },
+                }
+
+        inner = RecordingAgent()
+        agent = bridge.SafeDecisionAgent(inner)
+        result = agent.predict({}, {
+            "only_choice": {"type": "choice", "instructions": "No decision exists", "criteria": {"automatic": "the sole feasible option"}},
+            "real_choice": {"type": "choice", "instructions": "Choose", "criteria": {"first": "A", "second": "B"}},
+        })
+        self.assertEqual(len(inner.calls), 1)
+        self.assertEqual(set(inner.calls[0]), {"real_choice"})
+        self.assertEqual(result["answers"]["only_choice"]["choice"], "automatic")
+        self.assertTrue(result["answers"]["only_choice"]["resolved_without_model"])
+
+    def test_all_single_option_questions_skip_laya_entirely(self):
+        class ExplodingAgent:
+            def predict(self, state, questions):
+                raise AssertionError("Laya must not receive a one-option question")
+
+        result = bridge.SafeDecisionAgent(ExplodingAgent()).predict({}, {
+            "target": {"type": "choice", "instructions": "Choose", "criteria": {"42": "only valid target"}},
+        })
+        self.assertEqual(result["answers"]["target"]["probabilities"], {"42": 1.0})
+
     def snapshot(self):
         return {
             "game": {"is_paused": False},

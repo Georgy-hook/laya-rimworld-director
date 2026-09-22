@@ -21,7 +21,7 @@ import laya_preferences
 from .i18n import PRIORITY_TEXT, QUESTION_TEXT, doctrine_view, humanize, tr
 from .services import (
     APP_NAME, BASE_DIR, DATA_DIR, PREFERENCES_PATH, RESOURCE_DIR, export_bundle, export_history,
-    load_config, read_pid, request_json, start_director, stop_director, tail_jsonl,
+    load_config, read_director_health, read_pid, request_json, start_director, stop_director, tail_jsonl,
     timestamped_export_name,
 )
 from .theme import (
@@ -40,6 +40,7 @@ class ControlCenter(tk.Tk):
         self.log_path = self.log_dir / "decisions.jsonl"
         self.state_path = self.log_dir / "colony-state.json"
         self.pid_path = self.log_dir / "director.pid"
+        self.runtime_status_path = self.log_dir / "runtime-status.json"
         self.preferences = laya_preferences.load_preferences(PREFERENCES_PATH)
         self.language = str(self.preferences.get("language") or "ru")
         self.records: list[dict[str, Any]] = []
@@ -98,6 +99,9 @@ class ControlCenter(tk.Tk):
         self.avoid_attacks_var = tk.BooleanVar(value=bool(safety.get("avoid_unprovoked_attacks")))
         self.peaceful_trade_var = tk.BooleanVar(value=bool(safety.get("prefer_peaceful_trade")))
         self.protect_food_var = tk.BooleanVar(value=bool(safety.get("protect_food_reserve", True)))
+        overlay = self.preferences.get("overlay") or {}
+        self.overlay_enabled_var = tk.BooleanVar(value=bool(overlay.get("enabled", True)))
+        self.overlay_compact_var = tk.BooleanVar(value=bool(overlay.get("compact", True)))
 
     def _load_shared_images(self) -> None:
         self.flag_images = {
@@ -329,6 +333,13 @@ class ControlCenter(tk.Tk):
         ttk.Checkbutton(logging.body, text=tr(self.language, "technical_logging"), variable=self.tech_var, command=self.toggle_technical).pack(anchor="w")
         tk.Label(logging.body, text=tr(self.language, "technical_help"), bg=COLORS["panel"], fg=COLORS["muted"], font=FONTS["small"], justify="left", wraplength=440).pack(anchor="w", pady=(8, 0))
 
+        overlay = ShadowCard(page)
+        overlay.pack(fill="x", pady=(14, 0))
+        tk.Label(overlay.body, text=tr(self.language, "overlay_title"), bg=COLORS["panel"], fg=COLORS["amber"], font=FONTS["heading"]).pack(anchor="w")
+        tk.Label(overlay.body, text=tr(self.language, "overlay_help"), bg=COLORS["panel"], fg=COLORS["muted"], font=FONTS["small"], justify="left", wraplength=940).pack(anchor="w", pady=(5, 8))
+        ttk.Checkbutton(overlay.body, text=tr(self.language, "overlay_enabled"), variable=self.overlay_enabled_var, command=self.save_overlay_settings).pack(anchor="w", pady=4)
+        ttk.Checkbutton(overlay.body, text=tr(self.language, "overlay_compact"), variable=self.overlay_compact_var, command=self.save_overlay_settings).pack(anchor="w", pady=4)
+
         maintenance = ShadowCard(page)
         maintenance.pack(fill="x", pady=14)
         tk.Label(maintenance.body, text=tr(self.language, "maintenance"), bg=COLORS["panel"], fg=COLORS["amber"], font=FONTS["heading"]).pack(anchor="w")
@@ -388,6 +399,25 @@ class ControlCenter(tk.Tk):
             "protect_food_reserve": self.protect_food_var.get(),
         }
         self.preferences["technical_logging"] = self.tech_var.get()
+        self.preferences["overlay"] = {
+            "enabled": self.overlay_enabled_var.get(),
+            "compact": self.overlay_compact_var.get(),
+            "max_options": int((self.preferences.get("overlay") or {}).get("max_options", 5)),
+        }
+
+    def save_overlay_settings(self) -> None:
+        self._capture_preferences()
+        laya_preferences.save_preferences(self.preferences, PREFERENCES_PATH)
+        if not self.overlay_enabled_var.get():
+            try:
+                request_json(
+                    f"{str(self.config_data['api_url']).rstrip('/')}/api/v1/ui/announce",
+                    method="POST",
+                    body={"text": "", "duration": 0.0, "panel": True, "compact": True, "bars": []},
+                )
+            except Exception:
+                pass
+        self.footer.configure(text=tr(self.language, "overlay_saved"), fg=COLORS["green"])
 
     def reset_priorities(self) -> None:
         for key, value in laya_preferences.DEFAULT_PRIORITIES.items():
@@ -405,19 +435,24 @@ class ControlCenter(tk.Tk):
             self.show_selected()
 
     def start_laya(self) -> None:
-        existing = read_pid(self.pid_path)
-        if existing:
+        health = read_director_health(self.pid_path, self.runtime_status_path)
+        existing = health.get("pid")
+        if existing and health.get("state") in {"running", "starting", "waiting"}:
             messagebox.showinfo(APP_NAME, tr(self.language, "laya_online"))
             return
         try:
-            pid = start_director(self.config_data, self.log_path, self.state_path, self.pid_path)
+            # A live PID with a stale/error heartbeat is not a healthy
+            # autopilot. Replace it instead of leaving the Start button inert.
+            if existing:
+                stop_director(self.pid_path, self.runtime_status_path)
+            pid = start_director(self.config_data, self.log_path, self.state_path, self.pid_path, self.runtime_status_path)
             self.footer.configure(text=f"{tr(self.language, 'laya_online')} · PID {pid}", fg=COLORS["green"])
         except (OSError, FileNotFoundError) as exc:
             messagebox.showerror(APP_NAME, f"{tr(self.language, 'error')}: {exc}")
 
     def stop_laya(self) -> None:
         try:
-            pid = stop_director(self.pid_path)
+            pid = stop_director(self.pid_path, self.runtime_status_path)
             self.footer.configure(text=tr(self.language, "laya_offline") if pid else tr(self.language, "laya_offline"), fg=COLORS["muted"])
         except OSError as exc:
             messagebox.showerror(APP_NAME, f"{tr(self.language, 'error')}: {exc}")
@@ -468,9 +503,21 @@ class ControlCenter(tk.Tk):
         self.after(2000, self.refresh_all)
 
     def refresh_views(self) -> None:
-        pid = read_pid(self.pid_path)
-        self.laya_chip.configure(text=tr(self.language, "laya_online" if pid else "laya_offline"), fg=status_color(bool(pid)))
-        self.sidebar_status.configure(text=f"● {tr(self.language, 'laya_online' if pid else 'laya_offline')}\n● {tr(self.language, 'game_online' if self.game_online else 'game_offline')}")
+        health = read_director_health(self.pid_path, self.runtime_status_path)
+        state = str(health.get("state") or "stopped")
+        status_key = {
+            "running": "laya_online",
+            "starting": "laya_starting",
+            "waiting": "laya_waiting",
+            "error": "laya_error",
+            "unresponsive": "laya_unresponsive",
+        }.get(state, "laya_offline")
+        color = COLORS["green"] if state == "running" else COLORS["amber"] if state in {"starting", "waiting"} else COLORS["red"]
+        status_text = tr(self.language, status_key)
+        self.laya_chip.configure(text=status_text, fg=color)
+        self.sidebar_status.configure(text=f"● {status_text}\n● {tr(self.language, 'game_online' if self.game_online else 'game_offline')}")
+        if state in {"error", "unresponsive"} and health.get("detail"):
+            self.footer.configure(text=str(health["detail"])[:180], fg=COLORS["red"])
         map_state = self._load_map_state()
         self._refresh_doctrine(map_state)
         self._refresh_history()

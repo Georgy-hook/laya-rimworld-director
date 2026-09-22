@@ -27,7 +27,9 @@ namespace RIMAPI.Services
                     request.Duration,
                     request.Color,
                     request.Scale,
-                    request.Panel
+                    request.Panel,
+                    request.Compact,
+                    request.Bars
                 ));
             });
 

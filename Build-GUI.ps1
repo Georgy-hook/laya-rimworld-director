@@ -62,7 +62,13 @@ try {
     }
     Get-ChildItem -LiteralPath $releaseDirectory -Directory -Filter "__pycache__" -Recurse |
         Remove-Item -Recurse -Force
+    Get-ChildItem -LiteralPath $releaseDirectory -Directory -Recurse |
+        Where-Object { $_.Name -in @("bin", "obj") } |
+        Sort-Object FullName -Descending |
+        Remove-Item -Recurse -Force
     Get-ChildItem -LiteralPath $releaseDirectory -File -Filter "*.pyc" -Recurse |
+        Remove-Item -Force
+    Get-ChildItem -LiteralPath $releaseDirectory -File -Filter "*.pdb" -Recurse |
         Remove-Item -Force
     Copy-Item -LiteralPath (Join-Path $distribution "RimWorld-Autopilot.exe") -Destination $releaseDirectory -Force
     Copy-Item -LiteralPath (Join-Path $distribution "RimWorld-Autopilot-Setup.exe") -Destination $releaseDirectory -Force

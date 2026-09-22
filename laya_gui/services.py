@@ -8,8 +8,9 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.request import Request, urlopen
@@ -78,6 +79,45 @@ def read_pid(path: Path) -> int | None:
     return None
 
 
+def read_director_health(pid_path: Path, status_path: Path, stale_after: float = 45.0) -> dict[str, Any]:
+    """Combine process liveness with a fresh director heartbeat.
+
+    A PID alone can describe a hung director or, after PID reuse, an unrelated
+    process. The status file is written by the director and carries the same PID,
+    current phase and a UTC heartbeat.
+    """
+
+    pid = read_pid(pid_path)
+    if not pid:
+        return {"state": "stopped", "pid": None, "healthy": False, "detail": ""}
+    try:
+        payload = json.loads(status_path.read_text(encoding="utf-8-sig"))
+        if not isinstance(payload, dict) or int(payload.get("pid") or 0) != pid:
+            raise ValueError("runtime status belongs to another process")
+        updated = datetime.fromisoformat(str(payload.get("updated_at") or "").replace("Z", "+00:00"))
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=timezone.utc)
+        age = max(0.0, (datetime.now(timezone.utc) - updated).total_seconds())
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        try:
+            age = max(0.0, (datetime.now().timestamp() - pid_path.stat().st_mtime))
+        except OSError:
+            age = stale_after + 1
+        state = "starting" if age <= stale_after else "unresponsive"
+        return {"state": state, "pid": pid, "healthy": False, "detail": "", "age": age}
+    state = str(payload.get("state") or "running")
+    if age > stale_after:
+        state = "unresponsive"
+    return {
+        **payload,
+        "state": state,
+        "pid": pid,
+        "healthy": state == "running",
+        "age": age,
+        "detail": str(payload.get("detail") or ""),
+    }
+
+
 def tail_jsonl(path: Path, limit: int = 500) -> list[dict[str, Any]]:
     try:
         with path.open("rb") as handle:
@@ -102,13 +142,17 @@ def tail_jsonl(path: Path, limit: int = 500) -> list[dict[str, Any]]:
         return []
 
 
-def request_json(url: str, method: str = "GET") -> dict[str, Any]:
-    req = Request(url, method=method, headers={"Accept": "application/json"})
+def request_json(url: str, method: str = "GET", body: dict[str, Any] | None = None) -> dict[str, Any]:
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    headers = {"Accept": "application/json"}
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    req = Request(url, data=data, method=method, headers=headers)
     with urlopen(req, timeout=1.5) as response:
         return json.loads(response.read().decode("utf-8-sig"))
 
 
-def start_director(config: dict[str, Any], log_path: Path, state_path: Path, pid_path: Path) -> int:
+def start_director(config: dict[str, Any], log_path: Path, state_path: Path, pid_path: Path, runtime_status_path: Path) -> int:
     python_exe = Path(str(config["python_exe"]))
     director = Path(str(config["director_script"]))
     if not python_exe.exists() or not director.exists():
@@ -121,24 +165,39 @@ def start_director(config: dict[str, Any], log_path: Path, state_path: Path, pid
         str(python_exe), "-u", str(director), "--device", str(config.get("device", "cuda")),
         "--interval", str(config.get("interval", 10)), "--api-url", str(config.get("api_url", "http://localhost:8765")),
         "--log", str(log_path), "--state", str(state_path), "--pid-file", str(pid_path),
+        "--runtime-status", str(runtime_status_path),
     ]
     environment = os.environ.copy()
     environment["RIMWORLD_AUTOPILOT_PREFERENCES"] = str(PREFERENCES_PATH)
     try:
+        runtime_status_path.unlink(missing_ok=True)
+        pid_path.unlink(missing_ok=True)
         process = subprocess.Popen(args, cwd=BASE_DIR, stdout=stdout, stderr=stderr, creationflags=flags, env=environment)
-        pid_path.write_text(str(process.pid), encoding="ascii")
+        # A Windows venv launcher can create a child python3.x process. The
+        # director writes its own real PID immediately; overwriting it with the
+        # launcher PID would make its heartbeat look unrelated to the process.
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            try:
+                director_pid = int(pid_path.read_text(encoding="ascii").strip())
+                if director_pid > 0:
+                    return director_pid
+            except (OSError, ValueError):
+                time.sleep(0.05)
         return process.pid
     finally:
         stdout.close()
         stderr.close()
 
 
-def stop_director(pid_path: Path) -> int | None:
+def stop_director(pid_path: Path, runtime_status_path: Path | None = None) -> int | None:
     pid = read_pid(pid_path)
     if not pid:
         return None
     os.kill(pid, signal.SIGTERM)
     pid_path.unlink(missing_ok=True)
+    if runtime_status_path is not None:
+        runtime_status_path.unlink(missing_ok=True)
     return pid
 
 

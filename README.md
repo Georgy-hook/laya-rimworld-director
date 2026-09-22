@@ -39,7 +39,8 @@ The project is unofficial and experimental. It can make bad decisions and lose a
 - Ideology: inspect the current colony ideology and build a ritual room around its exact required altar or ideogram.
 - Ancient Danger: treat the proximity warning as a sealed strategic site rather than a raid; Laya chooses to leave it, prepare, or designate a normal wall-deconstruction job to open it, then resumes the warning pause.
 - Content-aware doctrine v2: 30 Core/DLC strategic archetypes are composed with settlement, economy, technology, defense, society, diplomacy and all official endgame axes. Inactive DLC choices are hidden; the selected course, available catalogue and every cascade probability appear in the GUI.
-- Observability: an in-game overlay and Windows control center show choices, probabilities, results and exportable history.
+- Observability: an optional compact in-game HUD shows the selected action and yellow probability bars; the Windows control center shows choices, results, exportable history and real heartbeat-based states instead of treating a surviving PID as proof that Laya is healthy.
+- Decision integrity: a single feasible outcome is resolved deterministically by the bridge and is never sent to Laya as a fake choice; the model is invoked only when at least two real alternatives remain.
 - Friendly control center: dark fancy-cartoon dashboard with rounded cards, animated buttons and orbit effects, a panoramic colony scene, a coordinated original icon set, responsive scrollable pages, modern scrollbars, real flag artwork, Russian/English UI, friendly decision explanations and an optional technical view.
 - Player guidance: eight priority weights, a personal instruction and peaceful/safety boundaries are read by development, combat and event decisions without bypassing feasibility gates.
 - Standard Windows installer: `RimWorld-Autopilot-0.0.2-Setup.exe` installs to Program Files, offers a desktop shortcut, registers a Windows uninstaller, then opens the friendly one-time assistant for Python, local-model and RIMAPI configuration. The temporary assistant is removed when setup finishes.
@@ -196,7 +197,7 @@ Reproducible Windows GUI binaries (creates a separate build environment):
 
 The same command assembles `dist/rimworld-autopilot-0.0.2.zip` and compiles `dist/RimWorld-Autopilot-0.0.2-Setup.exe` with Inno Setup 6.7+. The installer embeds the complete payload, a temporary post-install configuration assistant, the custom portrait artwork and standard Windows uninstall metadata.
 
-The 0.0.2 development branch passes 61 Python tests, smoke-tests both Tk applications and compiles the C# mod with zero warnings/errors.
+The 0.0.2 development branch passes 67 Python tests, smoke-tests both Tk applications and compiles the C# mod with zero warnings/errors.
 
 ## Data and privacy
 

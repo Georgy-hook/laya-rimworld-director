@@ -11,6 +11,7 @@ autopilot-preferences.json
 # Python
 .venv/
 .build-venv/
+.tools/
 __pycache__/
 *.py[cod]
 .pytest_cache/

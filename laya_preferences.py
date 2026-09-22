@@ -20,9 +20,14 @@ DEFAULT_PRIORITIES = {
 }
 
 DEFAULT_PREFERENCES: dict[str, Any] = {
-    "schema_version": 1,
+    "schema_version": 2,
     "language": "ru",
     "technical_logging": False,
+    "overlay": {
+        "enabled": True,
+        "compact": True,
+        "max_options": 5,
+    },
     "priorities": DEFAULT_PRIORITIES,
     "personal_note": "",
     "safety": {
@@ -51,6 +56,7 @@ def load_preferences(path: Path | None = None) -> dict[str, Any]:
         **DEFAULT_PREFERENCES,
         "priorities": dict(DEFAULT_PRIORITIES),
         "safety": dict(DEFAULT_PREFERENCES["safety"]),
+        "overlay": dict(DEFAULT_PREFERENCES["overlay"]),
     }
     source = path or preferences_path()
     if path is None and not source.exists():
@@ -63,7 +69,7 @@ def load_preferences(path: Path | None = None) -> dict[str, Any]:
         return result
     if not isinstance(loaded, dict):
         return result
-    result.update({key: value for key, value in loaded.items() if key not in {"priorities", "safety"}})
+    result.update({key: value for key, value in loaded.items() if key not in {"priorities", "safety", "overlay"}})
     if isinstance(loaded.get("priorities"), dict):
         for key in DEFAULT_PRIORITIES:
             try:
@@ -72,6 +78,15 @@ def load_preferences(path: Path | None = None) -> dict[str, Any]:
                 pass
     if isinstance(loaded.get("safety"), dict):
         result["safety"].update({key: bool(value) for key, value in loaded["safety"].items() if key in result["safety"]})
+    if isinstance(loaded.get("overlay"), dict):
+        result["overlay"].update({
+            "enabled": bool(loaded["overlay"].get("enabled", result["overlay"]["enabled"])),
+            "compact": bool(loaded["overlay"].get("compact", result["overlay"]["compact"])),
+        })
+        try:
+            result["overlay"]["max_options"] = max(3, min(8, int(loaded["overlay"].get("max_options", 5))))
+        except (TypeError, ValueError):
+            pass
     result["language"] = "en" if result.get("language") == "en" else "ru"
     result["technical_logging"] = bool(result.get("technical_logging"))
     result["personal_note"] = str(result.get("personal_note") or "")[:1200]
@@ -92,9 +107,10 @@ def load_preferences_from_value(data: dict[str, Any]) -> dict[str, Any]:
         **DEFAULT_PREFERENCES,
         "priorities": dict(DEFAULT_PRIORITIES),
         "safety": dict(DEFAULT_PREFERENCES["safety"]),
+        "overlay": dict(DEFAULT_PREFERENCES["overlay"]),
     }
     if isinstance(data, dict):
-        result.update({key: value for key, value in data.items() if key not in {"priorities", "safety"}})
+        result.update({key: value for key, value in data.items() if key not in {"priorities", "safety", "overlay"}})
         for key in DEFAULT_PRIORITIES:
             try:
                 result["priorities"][key] = max(0, min(100, int((data.get("priorities") or {}).get(key, result["priorities"][key]))))
@@ -102,6 +118,15 @@ def load_preferences_from_value(data: dict[str, Any]) -> dict[str, Any]:
                 pass
         if isinstance(data.get("safety"), dict):
             result["safety"].update({key: bool(value) for key, value in data["safety"].items() if key in result["safety"]})
+        if isinstance(data.get("overlay"), dict):
+            result["overlay"].update({
+                "enabled": bool(data["overlay"].get("enabled", result["overlay"]["enabled"])),
+                "compact": bool(data["overlay"].get("compact", result["overlay"]["compact"])),
+            })
+            try:
+                result["overlay"]["max_options"] = max(3, min(8, int(data["overlay"].get("max_options", 5))))
+            except (TypeError, ValueError):
+                pass
     result["language"] = "en" if result.get("language") == "en" else "ru"
     result["technical_logging"] = bool(result.get("technical_logging"))
     result["personal_note"] = str(result.get("personal_note") or "")[:1200]
