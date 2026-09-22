@@ -4084,6 +4084,24 @@ def write_runtime_status(path: Path, state: str, detail: str = "") -> None:
     temporary.replace(path)
 
 
+def classify_runtime_problem(detail: str) -> tuple[str, str, str]:
+    """Separate an unavailable game from an actual decision-cycle failure."""
+
+    lowered = detail.lower()
+    if "no loaded map" in lowered or "load a colony" in lowered:
+        return "waiting", detail, "Waiting for a loaded colony"
+    unavailable_markers = (
+        "winerror 10061",
+        "connection refused",
+        "actively refused",
+        "конечный компьютер отверг",
+        "expecting value: line 1 column 1",
+    )
+    if any(marker in lowered for marker in unavailable_markers):
+        return "waiting", "RimWorld or RIMAPI is not available yet", "Waiting for RimWorld/RIMAPI"
+    return "error", detail, "Decision cycle problem"
+
+
 def main() -> int:
     args = parser().parse_args()
     singleton_handle = None
@@ -4209,15 +4227,12 @@ def main() -> int:
             except (bridge.RimApiError, OSError, ValueError, RuntimeError) as exc:
                 now = time.monotonic()
                 detail = str(exc)
-                waiting_for_map = "no loaded map" in detail.lower() or "load a colony" in detail.lower()
-                runtime_state = "waiting" if waiting_for_map else "error"
-                runtime_detail = detail
+                runtime_state, runtime_detail, prefix = classify_runtime_problem(detail)
                 write_runtime_status(args.runtime_status, runtime_state, runtime_detail)
                 if now - last_wait_message >= 60:
-                    prefix = "Waiting for a loaded colony" if waiting_for_map else "Decision cycle problem"
                     print(f"[{bridge.utc_now()}] {prefix}: {exc}", flush=True)
                     last_wait_message = now
-                bridge.append_log(args.log, {"timestamp": bridge.utc_now(), "mode": "waiting", "error": repr(exc)})
+                bridge.append_log(args.log, {"timestamp": bridge.utc_now(), "mode": runtime_state, "error": repr(exc)})
             except Exception as exc:
                 runtime_state = "error"
                 runtime_detail = f"Unexpected cycle error: {exc}"

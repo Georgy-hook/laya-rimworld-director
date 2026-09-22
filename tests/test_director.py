@@ -491,6 +491,20 @@ class DirectorTests(unittest.TestCase):
         })
         self.assertIn("factory", options)
 
+    def test_unavailable_rimapi_is_waiting_not_a_laya_cycle_error(self):
+        state, detail, prefix = director.classify_runtime_problem(
+            "/api/v1/game/state: <urlopen error [WinError 10061] connection refused>"
+        )
+        self.assertEqual(state, "waiting")
+        self.assertIn("RimWorld", detail)
+        self.assertEqual(prefix, "Waiting for RimWorld/RIMAPI")
+
+    def test_real_cycle_failure_remains_an_error(self):
+        state, detail, prefix = director.classify_runtime_problem("invalid combat target")
+        self.assertEqual(state, "error")
+        self.assertEqual(detail, "invalid combat target")
+        self.assertEqual(prefix, "Decision cycle problem")
+
 
 if __name__ == "__main__":
     unittest.main()

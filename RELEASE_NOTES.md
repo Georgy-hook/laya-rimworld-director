@@ -12,6 +12,7 @@ Highlights:
 - persistent player guidance: eight priority weights, a personal note, peaceful preferences and an enforceable no-unprovoked-raids boundary;
 - compact normal logs plus opt-in diagnostic snapshots in technical logging mode;
 - heartbeat-based process health, so the GUI distinguishes loading, waiting, decision errors and a hung director instead of trusting PID existence alone;
+- a closed or still-starting RimWorld/RIMAPI connection is reported as waiting for the game, not as a Laya decision-cycle failure;
 - optional compact in-game HUD with yellow probability bars and an immediate hide switch in Settings;
 - a central decision guard that resolves a sole feasible action without calling Laya, guaranteeing that the model only receives choices with at least two real alternatives;
 - standard dark/light Windows installer with custom portrait art, Program Files destination, optional desktop shortcut, temporary configuration assistant, registered Installed-apps entry and normal uninstaller;
@@ -41,7 +42,7 @@ Highlights:
 - additive workbench upgrade chains that retain the old bench until its researched replacement is constructed;
 - a live building-definition catalog so DLC/mod construction is discoverable without hard-coding every Def;
 - stockpile priorities now preserve RimWorld's complete 0–5 range, so Critical food/corpse zones work as intended;
-- 67 deterministic Python tests, two GUI smoke tests and a zero-warning C# build.
+- 69 deterministic Python tests, two GUI smoke tests and a zero-warning C# build.
 
 The branch remains experimental. Use copied saves and review the GUI/overlay decision history.
 
