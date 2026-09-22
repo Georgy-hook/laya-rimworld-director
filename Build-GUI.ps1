@@ -30,7 +30,22 @@ try {
     & $builder -m PyInstaller @shared --uac-admin --name "RimWorld-Autopilot-Setup" (Join-Path $projectRoot "autopilot_setup.py")
     if ($LASTEXITCODE -ne 0) { throw "RimWorld Autopilot Setup build failed." }
 
-    Write-Host "GUI executables are ready in $distribution"
+    $releaseName = "RimWorld-Autopilot-0.0.2"
+    $releaseDirectory = Join-Path $distribution $releaseName
+    New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
+    Get-ChildItem -LiteralPath $projectRoot -File |
+        Where-Object { ($_.Extension -in @(".py", ".ps1", ".cmd", ".md", ".txt")) -or ($_.Name -in @("LICENSE", "RIMAPI_UPSTREAM_COMMIT")) } |
+        Where-Object { $_.Name -notin @("laya-control.json", "laya-preferences.json", "rimworld-autopilot.json", "autopilot-preferences.json") } |
+        Copy-Item -Destination $releaseDirectory -Force
+    foreach ($folder in @("assets", "laya_gui", "vendor")) {
+        Copy-Item -LiteralPath (Join-Path $projectRoot $folder) -Destination $releaseDirectory -Recurse -Force
+    }
+    Copy-Item -LiteralPath (Join-Path $distribution "RimWorld-Autopilot.exe") -Destination $releaseDirectory -Force
+    Copy-Item -LiteralPath (Join-Path $distribution "RimWorld-Autopilot-Setup.exe") -Destination $releaseDirectory -Force
+    $archive = Join-Path $distribution "rimworld-autopilot-0.0.2.zip"
+    Compress-Archive -Path (Join-Path $releaseDirectory "*") -DestinationPath $archive -CompressionLevel Optimal -Force
+
+    Write-Host "GUI executables and release archive are ready in $distribution"
 }
 finally {
     Pop-Location

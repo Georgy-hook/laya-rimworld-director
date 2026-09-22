@@ -42,4 +42,4 @@ Normal logging keeps compact decisions, outcomes and probability paths. Technica
 
 The installer does not request an API key, start RimWorld, alter saves or enable mods without the player.
 
-The release EXE stays beside `requirements.txt`, the Python controller sources and `vendor/RIMAPI`; those adjacent files are the payload it installs. Maintainers can reproduce both signed-independent Windows binaries with `Build-GUI.ps1`. Build-only dependencies are isolated in `.build-venv` and declared in `requirements-build.txt`.
+The release EXE stays beside `requirements.txt`, the Python controller sources and `vendor/RIMAPI`; those adjacent files are the payload it installs. `Build-GUI.ps1` reproduces both unsigned Windows binaries and assembles `dist/rimworld-autopilot-0.0.2.zip` with that complete payload. Build-only dependencies are isolated in `.build-venv` and declared in `requirements-build.txt`.

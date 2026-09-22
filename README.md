@@ -186,6 +186,8 @@ Reproducible Windows GUI binaries (creates a separate build environment):
 .\Build-GUI.ps1
 ```
 
+The same command also assembles `dist/rimworld-autopilot-0.0.2.zip`, containing both EXEs and every adjacent file required by the graphical installer.
+
 The 0.0.2 development branch passes 61 Python tests, smoke-tests both Tk applications and compiles the C# mod with zero warnings/errors.
 
 ## Data and privacy
