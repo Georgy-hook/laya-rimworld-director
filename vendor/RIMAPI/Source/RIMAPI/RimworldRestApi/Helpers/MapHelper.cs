@@ -54,6 +54,9 @@ namespace RIMAPI.Helpers
                             IsPlayerHome = map.IsPlayerHome,
                             IsPocketMap = map.IsPocketMap,
                             IsTempIncidentMap = map.IsTempIncidentMap,
+                            IsCurrentMap = map == Find.CurrentMap,
+                            FreeColonists = map.mapPawns.FreeColonistsSpawnedCount,
+                            Hostiles = map.mapPawns.AllPawnsSpawned.Count(p => p != null && !p.Dead && p.HostileTo(Faction.OfPlayer)),
                             Size = map.Size.ToString(),
                         }
                     );

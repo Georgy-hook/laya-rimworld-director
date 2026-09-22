@@ -25,6 +25,30 @@ RIMAPI snapshot
 
 Hunting, taming, wild harvesting, flooring, paths, doctrine, sculpture placement, temples, construction projects, trade and combat rosters therefore have conditional parameter stages. A rejected branch cannot accidentally select or execute one of its targets.
 
+Combat follows its own hierarchy:
+
+```text
+verified hostile state
+  -> feasible tactical templates
+  -> exact healthy roster
+  -> exact caster/psycast only for a psychic tactic
+  -> RIMAPI live-map positioning and path validation
+```
+
+`colony_combat.py` owns tactical meaning. `CombatTacticsHelper` owns game-state mutation and refuses movement paths containing a player trap. Defensive structures are read from the map, so `killbox_hold`, doorway blocking, fallback lines, EMP positions and mortar options are only offered/applied with real infrastructure.
+
+Events use a parallel pipeline:
+
+```text
+all loaded IncidentDefs + recent occurrences + conditions + letters + quests
+  -> colony_events.py family (or unknown/mod fallback)
+  -> proportional response
+  -> nested trader, quest or rescue-site parameters when selected
+  -> deduplicated normal-game action
+```
+
+This avoids a permanent hard-coded event switch: new DLC/mod incidents remain visible and receive a conservative generic decision even before a dedicated family rule is added.
+
 Architecture is a deeper instance of the same rule:
 
 ```text

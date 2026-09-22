@@ -18,6 +18,8 @@ dist/
 Laya-Control-Center.exe
 vendor/RIMAPI/Source/**/bin/
 vendor/RIMAPI/Source/**/obj/
+vendor/RIMAPI/1.6/Assemblies/*.pdb
+vendor/RIMAPI/1.6/Assemblies/Newtonsoft.Json.dll
 
 # IDE / OS
 .vs/

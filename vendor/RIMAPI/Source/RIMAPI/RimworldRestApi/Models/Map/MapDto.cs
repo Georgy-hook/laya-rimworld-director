@@ -12,6 +12,9 @@ namespace RIMAPI.Models
         public bool IsPlayerHome { get; set; }
         public bool IsPocketMap { get; set; }
         public bool IsTempIncidentMap { get; set; }
+        public bool IsCurrentMap { get; set; }
+        public int FreeColonists { get; set; }
+        public int Hostiles { get; set; }
         public string Size { get; set; }
     }
 

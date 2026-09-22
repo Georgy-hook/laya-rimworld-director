@@ -3,6 +3,9 @@ import pathlib
 import sys
 import unittest
 
+import colony_combat
+import colony_events
+
 
 ROOT = pathlib.Path(__file__).parents[1]
 if str(ROOT) not in sys.path:
@@ -37,6 +40,58 @@ class DirectorTests(unittest.TestCase):
         def assert_choice(choice, criteria):
             if choice not in criteria:
                 raise AssertionError(f"{choice!r} not in {list(criteria)!r}")
+
+    def test_combat_catalog_contains_distinct_positioning_and_threat_tactics(self):
+        required = {
+            "kite", "melee_block", "wide_flank", "staggered_retreat", "drop_pod_encircle",
+            "infestation_choke", "cluster_poke", "intercept_kidnapper", "psycast_control",
+        }
+        self.assertTrue(required.issubset(colony_combat.TACTICS))
+        self.assertGreaterEqual(len(colony_combat.TACTICS), 25)
+
+    def test_psycast_options_include_focus_and_neural_heat_context(self):
+        snapshot = {"combat": {"colonists": [{
+            "id": 7, "name": "Psy", "health": 1, "is_dead": False, "is_downed": False,
+            "psyfocus": 0.62, "neural_heat": 12, "neural_heat_limit": 50,
+            "psycasts": [{"def_name": "Stun", "label": "Stun", "description": "brief stun", "hostile": True,
+                           "can_cast": True, "psyfocus_cost": 0.02, "entropy_gain": 8}],
+        }]}}
+        options = colony_combat.psycast_options(snapshot, hostile=True)
+        self.assertIn("7:Stun", options)
+        self.assertIn("heat 12/50", options["7:Stun"]["summary"])
+
+    def test_combat_tactics_use_existing_defenses_and_detect_kidnapper(self):
+        snapshot = {"combat": {
+            "colonists": [{"id": 1, "health": 1, "has_ranged_weapon": True, "is_dead": False,
+                            "is_downed": False, "distance_to_nearest_opponent": 12}],
+            "hostiles": [{"id": 9, "health": 1, "is_dead": False, "is_downed": False,
+                           "current_job": "Kidnap", "carrying_pawn_id": 3}],
+            "defenses": [{"kind": "trap"}, {"kind": "door"}], "available_weapons": [],
+        }}
+        options = colony_combat.available_tactics(snapshot)
+        self.assertIn("intercept_kidnapper", options)
+        self.assertIn("killbox_hold", options)
+        self.assertIn("fallback_line", options)
+
+    def test_unknown_mod_event_gets_safe_generic_handler(self):
+        event = {"def_name": "MyMod_RealityFold", "label": "Reality fold", "category": "MyModSpecial"}
+        self.assertEqual(colony_events.classify_event(event), "unknown")
+        options = colony_events.response_options({"family": "unknown"}, {})
+        self.assertIn("ask_laya_generic", options)
+        self.assertIn("observe_event", options)
+
+    def test_rescue_event_only_offers_mission_after_acceptance_and_site(self):
+        event = {"family": "kidnap_rescue"}
+        offered = {"active_quests": [{"quest_def": "PrisonerRescue", "ever_accepted": False, "look_targets": [{"world_object_id": 5}]}]}
+        self.assertNotIn("prepare_rescue_mission", colony_events.response_options(event, offered))
+        accepted = {"active_quests": [{"quest_def": "PrisonerRescue", "ever_accepted": True, "look_targets": [{"world_object_id": 5}]}]}
+        self.assertIn("prepare_rescue_mission", colony_events.response_options(event, accepted))
+
+    def test_event_history_deduplicates_same_occurrence(self):
+        context = {"recent_incidents": [{"incident_def": "HeatWave", "incident_hour": 100, "label": "Heat wave"}]}
+        first = colony_events.pending_events(context, set())
+        self.assertEqual(len(first), 1)
+        self.assertEqual(colony_events.pending_events(context, {first[0]["signature"]}), [])
 
     def test_bandaged_animal_is_not_retreated_for_low_health_alone(self):
         self.assertFalse(director.animal_needs_tending({

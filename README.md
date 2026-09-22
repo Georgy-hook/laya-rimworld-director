@@ -17,6 +17,12 @@ The project is unofficial and experimental. It can make bad decisions and lose a
 - Storage: expand near-full stockpiles, configure dedicated weapon shelves, place stone chunks beside the stonecutter, animal carcasses beside butchering, and human corpses in a distant critical-priority dump.
 - Housing and rooms: choose compact, courtyard, separate-house or mountain development; choose real available construction materials; build private bedrooms without replacing existing rooms.
 - Procedural architecture: choose a building program before its layout; generate 24 residential designs plus context-aware compounds, dining/rec halls, kitchens, hospitals, throne rooms, temples, workshops, factories, labs, warehouses, prisons, barns, nurseries, defenses and utility blocks from the definitions loaded by the current game.
+- Psycasts: expose every live vanilla/DLC/mod psycast with caster, level, range, target mode, cooldown, charges, psyfocus cost and neural heat; Laya may choose an exact cast, while RIMAPI rejects invalid targets, insufficient focus and unsafe heat overflow.
+- Combat doctrine: compare 28 situational tactics including focus fire, firing lines, kiting, staggered retreats, doorway/melee blocking, flanks, pincers, anti-explosive spacing, EMP/smoke operations, siege harassment, drop-pod encirclement, infestation containment, mech-cluster pokes and kidnapper interception.
+- Defensive integration: tactical positions are selected from defenses that actually exist on the map (doors, cover, traps, turrets, mortars, firefoam and fallback structures); every issued movement route is inspected and rejected if it crosses a friendly trap.
+- Event director: observe every loaded incident dynamically, classify known event families, surface unknown DLC/mod events conservatively, and deduplicate each occurrence while active conditions, letters and quest targets remain visible to Laya.
+- Kidnapping and rescue: track kidnapped world pawns, inspect rescue/ransom quest sites and estimated threat, accept a selected quest, then form a reserve-aware rescue caravan that enters the actual quest site.
+- Live trade: detect visiting traders and passing orbital ships, show their current stock/departure time and the best negotiator, then perform a normal reserve- and budget-aware transaction selected by Laya.
 - Workforce direction: inspect every loaded `WorkTypeDef` (including DLC/mod jobs), score long-term specializations against the actual colonists, and persist the chosen specialization in the colony doctrine.
 - Skills and passions: compare current level, disabled work, health, learning traits and no/small/large passion flames (35%/100%/150% XP multipliers), then let Laya choose a colonist-skill-work training plan.
 - Schedules: detect the Night Owl trait and let Laya move that colonist to daytime sleep (11:00–18:59) with a flexible nighttime schedule.
@@ -108,6 +114,8 @@ Each cycle follows a hierarchical decision pipeline:
 4. Choose one concrete action.
 5. Ask only for parameters belonging to that selected action; rejecting hunting never asks for prey, and rejecting wild harvest never asks for a plant.
 6. For architecture, choose program → house style when relevant → one bounded generated variant; the other programs and layouts are never evaluated.
+7. For combat, choose tactic → exact roster → psycast/caster only when a psychic tactic was selected; RIMAPI then resolves trap-free positions against live defenses.
+8. For events, choose one verified occurrence → response → trader/quest/mission parameters only when that branch needs them.
 7. Validate the selected choice again and translate it into normal game commands.
 
 Emergency survival gates run before long-horizon planning. Combat is checked much more often than ordinary development. Repeated orders are suppressed using a persistent state file and signatures of active combatants/jobs.
@@ -137,6 +145,8 @@ Important files:
 - `colony_professions.py` — profession-fit scoring, passion-aware skill development and Night Owl schedules.
 - `colony_architect.py` — live building catalog interpretation and procedural room/base design.
 - `rimworld_laya.py` — local API client and combat decision loop.
+- `colony_combat.py` — tactical catalogue, threat-sensitive filtering and psycast choices.
+- `colony_events.py` — extensible event-family classification and response hierarchy.
 - `laya_control.py` — Windows GUI.
 - `vendor/RIMAPI/` — complete corresponding source and compiled RimWorld 1.6 assembly for the modified GPL-3.0 mod.
 - `tests/` — deterministic unit tests for safety and blueprint logic.
@@ -159,7 +169,7 @@ Modified RIMAPI (requires the .NET 8 SDK; targets .NET Framework 4.7.2 through r
 dotnet build vendor\RIMAPI\Source\RIMAPI\RimApi.csproj -c Release-1.6
 ```
 
-The 0.0.2 development branch passes 44 Python tests and compiles the C# mod with zero warnings/errors.
+The 0.0.2 development branch passes 50 Python tests and compiles the C# mod with zero warnings/errors.
 
 ## Data and privacy
 

@@ -79,6 +79,12 @@ namespace RIMAPI.Models
         public string State { get; set; }
         public float ExpiryHours { get; set; }
         public List<string> Reward { get; set; }
+        public bool EverAccepted { get; set; }
+        public bool RequiresAccepter { get; set; }
+        public bool IncreasesPopulation { get; set; }
+        public List<string> Tags { get; set; } = new List<string>();
+        public List<string> InvolvedFactions { get; set; } = new List<string>();
+        public List<QuestTargetDto> LookTargets { get; set; } = new List<QuestTargetDto>();
     }
 
     public class TriggerIncidentRequestDto

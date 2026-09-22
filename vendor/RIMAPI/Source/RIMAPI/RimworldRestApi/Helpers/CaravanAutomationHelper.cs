@@ -7,6 +7,7 @@ using RimWorld;
 using RimWorld.Planet;
 using UnityEngine;
 using Verse;
+using Verse.AI;
 
 namespace RIMAPI.Helpers
 {
@@ -17,6 +18,7 @@ namespace RIMAPI.Helpers
             public HashSet<int> PawnIds;
             public HashSet<int> PrisonerIds;
             public int SettlementId;
+            public int? SiteId;
             public bool Raid;
         }
 
@@ -38,7 +40,17 @@ namespace RIMAPI.Helpers
                 Caravan caravan = Find.WorldObjects.Caravans.FirstOrDefault(c => c.Faction == Faction.OfPlayer
                     && c.PawnsListForReading.Any(p => pending.PawnIds.Contains(p.thingIDNumber)));
                 Settlement settlement = Find.WorldObjects.Settlements.FirstOrDefault(s => s.ID == pending.SettlementId);
-                if (caravan == null || settlement == null) continue;
+                Site site = pending.SiteId.HasValue
+                    ? Find.WorldObjects.AllWorldObjects.OfType<Site>().FirstOrDefault(s => s.ID == pending.SiteId.Value)
+                    : null;
+                if (caravan == null) continue;
+                if (site != null)
+                {
+                    caravan.pather.StartPath(site.Tile, new CaravanArrivalAction_VisitSite(site), true);
+                    PendingRoutes.RemoveAt(i);
+                    continue;
+                }
+                if (settlement == null) continue;
                 CaravanArrivalAction arrival = pending.Raid
                     ? (CaravanArrivalAction)new CaravanArrivalAction_AttackSettlement(settlement)
                     : new CaravanArrivalAction_Trade(settlement);
@@ -383,6 +395,179 @@ namespace RIMAPI.Helpers
                 LogApi.Error($"Raid caravan automation failed: {ex}");
                 return ApiResult<StartTradeCaravanResponseDto>.Fail(ex.Message);
             }
+        }
+
+        public static ApiResult<StartTradeCaravanResponseDto> StartRescueMission(RescueMissionRequestDto request)
+        {
+            try
+            {
+                Map map = MapHelper.GetMapByID(request.MapId);
+                if (map == null) return ApiResult<StartTradeCaravanResponseDto>.Fail($"Map {request.MapId} not found.");
+                if (GenHostility.AnyHostileActiveThreatToPlayer(map))
+                    return ApiResult<StartTradeCaravanResponseDto>.Fail("A rescue caravan cannot leave during an active home-map threat.");
+                if (Find.WorldObjects.Caravans.Any(c => c.Faction == Faction.OfPlayer))
+                    return ApiResult<StartTradeCaravanResponseDto>.Fail("A player caravan is already active.");
+                Quest quest = Find.QuestManager.QuestsListForReading.FirstOrDefault(q => q.id == request.QuestId && !q.Historical);
+                if (quest == null)
+                    return ApiResult<StartTradeCaravanResponseDto>.Fail("The rescue quest no longer exists.");
+                Site site = request.SiteId.HasValue
+                    ? Find.WorldObjects.AllWorldObjects.OfType<Site>().FirstOrDefault(s => s.ID == request.SiteId.Value)
+                    : quest.QuestLookTargets.Select(t => t.WorldObject).OfType<Site>().FirstOrDefault();
+                if (site == null)
+                    return ApiResult<StartTradeCaravanResponseDto>.Fail("The quest does not expose a reachable rescue site.");
+
+                var healthy = map.mapPawns.FreeColonistsSpawned
+                    .Where(p => !p.Downed && !p.InMentalState && p.health.summaryHealth.SummaryHealthPercent >= 0.82f)
+                    .OrderByDescending(p => (p.skills?.GetSkill(SkillDefOf.Shooting)?.Level ?? 0)
+                        + (p.skills?.GetSkill(SkillDefOf.Melee)?.Level ?? 0))
+                    .ToList();
+                int available = healthy.Count - Math.Max(2, request.MinimumHomeDefenders);
+                int threatSized = Math.Max(2, Math.Min(6, Mathf.CeilToInt(site.ActualThreatPoints / 180f)));
+                int sendCount = Math.Min(available, threatSized);
+                if (sendCount < 2)
+                    return ApiResult<StartTradeCaravanResponseDto>.Fail("At least two healthy rescuers are required after preserving home defenders.");
+                List<Pawn> pawns = healthy.Take(sendCount).ToList();
+                List<Thing> items = CaravanFormingUtility.AllReachableColonyItems(map);
+                int totalFood = items.Where(IsTravelFood).Sum(t => t.stackCount);
+                int totalMedicine = items.Where(IsMedicine).Sum(t => t.stackCount);
+                int takeFood = Math.Min(sendCount * 14, Math.Max(0, totalFood - request.MinimumFoodAtHome));
+                int takeMedicine = Math.Min(sendCount * 3, Math.Max(0, totalMedicine - request.MinimumMedicineAtHome));
+                if (takeFood < sendCount * 8 || takeMedicine < sendCount)
+                    return ApiResult<StartTradeCaravanResponseDto>.Fail("The rescue mission lacks travel food or medicine after preserving home reserves.");
+                var transferables = new List<TransferableOneWay>();
+                int foodAdded = AddByPredicate(transferables, items, IsTravelFood, takeFood);
+                AddByPredicate(transferables, items, IsMedicine, takeMedicine);
+
+                PlanetTile startingTile = CaravanExitMapUtility.BestExitTileToGoTo(site.Tile, map);
+                if (!startingTile.Valid)
+                    return ApiResult<StartTradeCaravanResponseDto>.Fail("No valid map exit toward the rescue site was found.");
+                IntVec3 root = pawns.Aggregate(IntVec3.Zero, (sum, pawn) => sum + pawn.Position) / pawns.Count;
+                if (!RCellFinder.TryFindClosestEdgeCellTo(root, map, out IntVec3 exitSpot))
+                    return ApiResult<StartTradeCaravanResponseDto>.Fail("No reachable caravan exit was found.");
+                if (!RCellFinder.TryFindRandomSpotJustOutsideColony(exitSpot, map, out IntVec3 meetingPoint)) meetingPoint = root;
+                CaravanFormingUtility.StartFormingCaravan(pawns, new List<Pawn>(), Faction.OfPlayer, transferables,
+                    meetingPoint, exitSpot, startingTile, site.Tile);
+                PendingRoutes.Add(new PendingRoute
+                {
+                    PawnIds = new HashSet<int>(pawns.Select(p => p.thingIDNumber)),
+                    PrisonerIds = new HashSet<int>(),
+                    SettlementId = -1,
+                    SiteId = site.ID,
+                    Raid = false,
+                });
+                Messages.Message("Laya: a rescue caravan is gathering for " + site.LabelCap + ".", pawns[0], MessageTypeDefOf.PositiveEvent, false);
+                return ApiResult<StartTradeCaravanResponseDto>.Ok(new StartTradeCaravanResponseDto
+                {
+                    Status = "forming rescue mission",
+                    DestinationSettlementId = site.ID,
+                    DestinationName = site.LabelCap,
+                    DestinationTile = site.Tile,
+                    PawnCount = pawns.Count,
+                    FoodCount = foodAdded,
+                });
+            }
+            catch (Exception ex)
+            {
+                LogApi.Error($"Rescue caravan automation failed: {ex}");
+                return ApiResult<StartTradeCaravanResponseDto>.Fail(ex.Message);
+            }
+        }
+
+        public static ApiResult<RescueSiteStatusDto> GetRescueSiteStatus(int mapId)
+        {
+            try
+            {
+                Map map = MapHelper.GetMapByID(mapId);
+                if (map == null) return ApiResult<RescueSiteStatusDto>.Fail($"Map {mapId} not found.");
+                List<Pawn> captives = RescueCaptives(map);
+                bool threat = GenHostility.AnyHostileActiveThreatToPlayer(map);
+                return ApiResult<RescueSiteStatusDto>.Ok(new RescueSiteStatusDto
+                {
+                    MapId = map.uniqueID,
+                    IsTemporaryMap = map.IsTempIncidentMap,
+                    ActiveThreat = threat,
+                    RescuerPawnIds = map.mapPawns.FreeColonistsSpawned.Select(p => p.thingIDNumber).ToList(),
+                    CaptivePawnIds = captives.Select(p => p.thingIDNumber).ToList(),
+                    CaptiveNames = captives.Select(p => p.Name?.ToStringShort ?? p.LabelShortCap).ToList(),
+                    CanReturnHome = map.IsTempIncidentMap && !threat && captives.Count == 0
+                        && map.mapPawns.FreeColonistsSpawned.Any(),
+                });
+            }
+            catch (Exception ex)
+            {
+                return ApiResult<RescueSiteStatusDto>.Fail(ex.Message);
+            }
+        }
+
+        public static ApiResult SecureRescueSite(RescueSiteRequestDto request)
+        {
+            try
+            {
+                Map map = MapHelper.GetMapByID(request.MapId);
+                if (map == null) return ApiResult.Fail($"Map {request.MapId} not found.");
+                if (GenHostility.AnyHostileActiveThreatToPlayer(map))
+                    return ApiResult.Fail("The rescue site still has an active threat.");
+                Pawn rescuer = map.mapPawns.FreeColonistsSpawned
+                    .Where(p => !p.Dead && !p.Downed && !p.InMentalState)
+                    .OrderByDescending(p => p.skills?.GetSkill(SkillDefOf.Social)?.Level ?? 0)
+                    .FirstOrDefault();
+                Pawn captive = RescueCaptives(map).FirstOrDefault();
+                if (rescuer == null || captive == null)
+                    return ApiResult.Fail("No reachable rescuer/captive pair is available.");
+                Job job = JobMaker.MakeJob(JobDefOf.ReleasePrisoner, captive);
+                job.playerForced = true;
+                if (!rescuer.jobs.TryTakeOrderedJob(job))
+                    return ApiResult.Fail("The rescuer could not accept the normal Release Prisoner job.");
+                Messages.Message("Laya: freeing " + captive.LabelShortCap + " at the cleared rescue site.", captive, MessageTypeDefOf.PositiveEvent, false);
+                return ApiResult.Ok();
+            }
+            catch (Exception ex)
+            {
+                return ApiResult.Fail(ex.Message);
+            }
+        }
+
+        public static ApiResult<StartTradeCaravanResponseDto> ReturnRescueTeamHome(RescueSiteRequestDto request)
+        {
+            try
+            {
+                Map map = MapHelper.GetMapByID(request.MapId);
+                if (map == null || !map.IsTempIncidentMap)
+                    return ApiResult<StartTradeCaravanResponseDto>.Fail("The selected map is not a temporary rescue site.");
+                if (GenHostility.AnyHostileActiveThreatToPlayer(map) || RescueCaptives(map).Count > 0)
+                    return ApiResult<StartTradeCaravanResponseDto>.Fail("The team cannot leave before threats are cleared and captives are freed.");
+                Map home = Find.Maps.FirstOrDefault(m => m.IsPlayerHome && m != map);
+                if (home == null)
+                    return ApiResult<StartTradeCaravanResponseDto>.Fail("No player home settlement exists for the return route.");
+                List<Pawn> pawns = map.mapPawns.AllPawnsSpawned
+                    .Where(p => p != null && !p.Dead && p.Faction == Faction.OfPlayer)
+                    .ToList();
+                if (!pawns.Any(p => p.RaceProps?.Humanlike == true))
+                    return ApiResult<StartTradeCaravanResponseDto>.Fail("No player-controlled rescuer remains on the site.");
+                Caravan caravan = CaravanExitMapUtility.ExitMapAndCreateCaravan(
+                    pawns, Faction.OfPlayer, map.Tile, Direction8Way.North, home.Tile, true);
+                caravan.pather.StartPath(home.Tile, new CaravanArrivalAction_Enter(home.Parent), true);
+                return ApiResult<StartTradeCaravanResponseDto>.Ok(new StartTradeCaravanResponseDto
+                {
+                    Status = "returning from rescue site",
+                    DestinationSettlementId = home.Parent.ID,
+                    DestinationName = home.Parent.LabelCap,
+                    DestinationTile = home.Tile,
+                    PawnCount = pawns.Count(p => p.RaceProps?.Humanlike == true),
+                });
+            }
+            catch (Exception ex)
+            {
+                LogApi.Error($"Rescue return automation failed: {ex}");
+                return ApiResult<StartTradeCaravanResponseDto>.Fail(ex.Message);
+            }
+        }
+
+        private static List<Pawn> RescueCaptives(Map map)
+        {
+            return map.mapPawns.AllPawnsSpawned.Where(p => p != null && !p.Dead
+                && p.RaceProps?.Humanlike == true && p.guest?.IsPrisoner == true
+                && !p.IsPrisonerOfColony && !p.HostileTo(Faction.OfPlayer)).ToList();
         }
 
         private static int AddByPredicate(List<TransferableOneWay> result, List<Thing> source, Func<Thing, bool> predicate, int wanted)

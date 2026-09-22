@@ -115,6 +115,36 @@ namespace RIMAPI.Controllers
             await context.SendJsonResponse(result);
         }
 
+        [Post("/api/v1/world/caravan/rescue/start")]
+        [EndpointMetadata("Form a reserve-aware caravan for an accepted quest rescue site")]
+        public async Task StartRescueCaravan(HttpListenerContext context)
+        {
+            var body = await context.Request.ReadBodyAsync<RescueMissionRequestDto>();
+            var result = CaravanAutomationHelper.StartRescueMission(body);
+            await context.SendJsonResponse(result);
+        }
+
+        [Get("/api/v1/world/rescue/site/status")]
+        public async Task GetRescueSiteStatus(HttpListenerContext context)
+        {
+            var mapId = RequestParser.GetIntParameter(context, "map_id");
+            await context.SendJsonResponse(CaravanAutomationHelper.GetRescueSiteStatus(mapId));
+        }
+
+        [Post("/api/v1/world/rescue/site/secure")]
+        public async Task SecureRescueSite(HttpListenerContext context)
+        {
+            var body = await context.Request.ReadBodyAsync<RescueSiteRequestDto>();
+            await context.SendJsonResponse(CaravanAutomationHelper.SecureRescueSite(body));
+        }
+
+        [Post("/api/v1/world/rescue/site/return")]
+        public async Task ReturnRescueTeamHome(HttpListenerContext context)
+        {
+            var body = await context.Request.ReadBodyAsync<RescueSiteRequestDto>();
+            await context.SendJsonResponse(CaravanAutomationHelper.ReturnRescueTeamHome(body));
+        }
+
         [Get("/api/v1/world/tile")]
         public async Task GetTile(HttpListenerContext context)
         {

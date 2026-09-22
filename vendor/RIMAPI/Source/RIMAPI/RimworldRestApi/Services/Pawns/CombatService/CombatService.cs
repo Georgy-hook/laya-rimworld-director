@@ -51,6 +51,20 @@ namespace RIMAPI.Services
                     .OrderByDescending(w => w.MarketValue)
                     .ToList();
 
+                var defenses = map.listerBuildings.allBuildingsColonist
+                    .Where(b => b != null && !b.Destroyed && b.def != null && IsDefensiveBuilding(b))
+                    .Select(b => new CombatDefenseDto
+                    {
+                        Id = b.thingIDNumber,
+                        DefName = b.def.defName,
+                        Label = b.LabelCap,
+                        Kind = DefenseKind(b),
+                        Position = new PositionDto { X = b.Position.x, Y = b.Position.y, Z = b.Position.z },
+                        Powered = b.TryGetComp<CompPowerTrader>()?.PowerOn ?? true,
+                        HitPointsPercent = b.MaxHitPoints > 0 ? (float)b.HitPoints / b.MaxHitPoints : 1f,
+                    })
+                    .ToList();
+
                 var result = new CombatStateDto
                 {
                     MapId = map.uniqueID,
@@ -59,6 +73,7 @@ namespace RIMAPI.Services
                     Hostiles = hostiles.Select(p => ToCombatPawn(p, true, colonists)).ToList(),
                     Prisoners = prisoners.Select(p => ToCombatPawn(p, false, colonists)).ToList(),
                     AvailableWeapons = weapons,
+                    Defenses = defenses,
                 };
                 return ApiResult<CombatStateDto>.Ok(result);
             }
@@ -75,6 +90,7 @@ namespace RIMAPI.Services
             var shooting = pawn.skills?.GetSkill(SkillDefOf.Shooting);
             var melee = pawn.skills?.GetSkill(SkillDefOf.Melee);
             var faction = pawn.Faction;
+            var entropy = pawn.psychicEntropy;
             var distance = 0f;
             if (opponents != null && opponents.Count > 0)
             {
@@ -116,6 +132,16 @@ namespace RIMAPI.Services
                 Sight = pawn.health?.capacities?.GetLevel(PawnCapacityDefOf.Sight) ?? 0f,
                 Pain = pawn.health?.hediffSet?.PainTotal ?? 0f,
                 MarketValue = pawn.MarketValue,
+                CombatPower = pawn.kindDef?.combatPower ?? 0f,
+                WeaponRange = primary?.def?.Verbs?.FirstOrDefault()?.range ?? 0f,
+                CarryingPawnId = pawn.carryTracker?.CarriedThing is Pawn carried ? (int?)carried.thingIDNumber : null,
+                Psyfocus = entropy?.CurrentPsyfocus ?? 0f,
+                TargetPsyfocus = entropy?.TargetPsyfocus ?? 0f,
+                NeuralHeat = entropy?.EntropyValue ?? 0f,
+                NeuralHeatLimit = entropy?.MaxEntropy ?? 0f,
+                PsychicSensitivity = entropy?.PsychicSensitivity ?? 0f,
+                PsylinkLevel = entropy?.Psylink?.level ?? 0,
+                Psycasts = PsychicAutomationHelper.GetPsycasts(pawn),
                 SocialSkill = pawn.skills?.GetSkill(SkillDefOf.Social)?.Level ?? 0,
                 MedicineSkill = pawn.skills?.GetSkill(SkillDefOf.Medicine)?.Level ?? 0,
                 ConstructionSkill = pawn.skills?.GetSkill(SkillDefOf.Construction)?.Level ?? 0,
@@ -134,6 +160,30 @@ namespace RIMAPI.Services
                     .Select(h => $"{h.def.defName}:{h.Part?.def?.defName ?? "whole body"}")
                     .Take(12).ToList() ?? new List<string>(),
             };
+        }
+
+        private static bool IsDefensiveBuilding(Building building)
+        {
+            string text = (building.def.defName + " " + building.Label).ToLowerInvariant();
+            return building is Building_Trap || building is Building_Turret || building is Building_Door
+                || text.Contains("wall") || text.Contains("barricade") || text.Contains("sandbag")
+                || text.Contains("mortar") || text.Contains("firefoam") || text.Contains("shield")
+                || text.Contains("shelf");
+        }
+
+        private static string DefenseKind(Building building)
+        {
+            string text = (building.def.defName + " " + building.Label).ToLowerInvariant();
+            if (building is Building_Trap) return "trap";
+            if (text.Contains("mortar")) return "mortar";
+            if (building is Building_Turret) return "turret";
+            if (building is Building_Door) return "door";
+            if (text.Contains("firefoam")) return "firefoam";
+            if (text.Contains("shield")) return "shield";
+            if (text.Contains("barricade") || text.Contains("sandbag")) return "barricade";
+            if (text.Contains("wall")) return "wall";
+            if (text.Contains("shelf")) return "cover";
+            return "defense";
         }
     }
 }

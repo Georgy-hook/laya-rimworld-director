@@ -17,41 +17,13 @@ namespace RIMAPI.Helpers
             dto.HistoricalQuests.AddRange(
                 allQuests
                     .Where(quest => quest.Historical)
-                    .Select(quest => new QuestDto
-                    {
-                        Id = quest.id,
-                        QuestDef = quest.root?.defName ?? "Unknown",
-                        Name = quest.name,
-                        Description = quest.description.ToString(),
-                        State = quest.State.ToString(),
-#if RIMWORLD_1_5
-                        ExpiryHours =
-                            GameTypesHelper.TicksToDays(quest.ticksUntilAcceptanceExpiry) * 24,
-#elif RIMWORLD_1_6
-                        ExpiryHours = GameTypesHelper.TicksToDays(quest.TicksUntilExpiry) * 24,
-#endif
-                        Reward = GetQuestRewardString(quest),
-                    })
+                    .Select(GameEventAutomationHelper.ToQuestDto)
             );
 
             dto.ActiveQuests.AddRange(
                 allQuests
                     .Where(quest => !quest.Historical)
-                    .Select(quest => new QuestDto
-                    {
-                        Id = quest.id,
-                        QuestDef = quest.root?.defName ?? "Unknown",
-                        Name = quest.name,
-                        Description = quest.description.ToString(),
-                        State = quest.State.ToString(),
-#if RIMWORLD_1_5
-                        ExpiryHours =
-                            GameTypesHelper.TicksToDays(quest.ticksUntilAcceptanceExpiry) * 24,
-#elif RIMWORLD_1_6
-                        ExpiryHours = GameTypesHelper.TicksToDays(quest.TicksUntilExpiry) * 24,
-#endif
-                        Reward = GetQuestRewardString(quest),
-                    })
+                    .Select(GameEventAutomationHelper.ToQuestDto)
             );
             return dto;
         }

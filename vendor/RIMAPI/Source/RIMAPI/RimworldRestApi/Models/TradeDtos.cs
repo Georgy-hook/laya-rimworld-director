@@ -45,4 +45,54 @@ namespace RIMAPI.Models
         [DefaultValue(true)]
         public bool Buys { get; set; } = true;
     }
+
+    public class LiveTradeItemDto
+    {
+        public string DefName { get; set; }
+        public string Label { get; set; }
+        public int Count { get; set; }
+        public float MarketValue { get; set; }
+        public System.Collections.Generic.List<string> Categories { get; set; } = new System.Collections.Generic.List<string>();
+    }
+
+    public class LiveTraderDto
+    {
+        public string Id { get; set; }
+        public string Name { get; set; }
+        public string TraderKind { get; set; }
+        public string Faction { get; set; }
+        public bool Orbital { get; set; }
+        public int? PawnId { get; set; }
+        public int TicksUntilDeparture { get; set; }
+        public int BestNegotiatorPawnId { get; set; }
+        public string BestNegotiatorName { get; set; }
+        public int NegotiatorSocialSkill { get; set; }
+        public bool HasPoweredCommsConsole { get; set; }
+        public bool HasPoweredOrbitalBeacon { get; set; }
+        public System.Collections.Generic.List<LiveTradeItemDto> Stock { get; set; } = new System.Collections.Generic.List<LiveTradeItemDto>();
+    }
+
+    public class LiveTradeRequestDto
+    {
+        public int MapId { get; set; }
+        public string TraderId { get; set; }
+        public System.Collections.Generic.List<string> SaleCategories { get; set; } = new System.Collections.Generic.List<string>();
+        public System.Collections.Generic.List<string> PurchasePriorities { get; set; } = new System.Collections.Generic.List<string>();
+        public int MinimumSilverReserve { get; set; } = 300;
+        public int MaximumSpend { get; set; } = 2000;
+    }
+
+    public class LiveTradeResponseDto
+    {
+        public string TraderId { get; set; }
+        public string TraderName { get; set; }
+        public string Negotiator { get; set; }
+        public int SoldUnits { get; set; }
+        public int BoughtUnits { get; set; }
+        public float ApproximateSaleValue { get; set; }
+        public float ApproximatePurchaseValue { get; set; }
+        public bool Executed { get; set; }
+        public System.Collections.Generic.List<string> Sold { get; set; } = new System.Collections.Generic.List<string>();
+        public System.Collections.Generic.List<string> Bought { get; set; } = new System.Collections.Generic.List<string>();
+    }
 }

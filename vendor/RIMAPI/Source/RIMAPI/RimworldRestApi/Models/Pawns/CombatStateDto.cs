@@ -10,6 +10,7 @@ namespace RIMAPI.Models
         public List<CombatPawnDto> Hostiles { get; set; } = new List<CombatPawnDto>();
         public List<CombatPawnDto> Prisoners { get; set; } = new List<CombatPawnDto>();
         public List<CombatWeaponDto> AvailableWeapons { get; set; } = new List<CombatWeaponDto>();
+        public List<CombatDefenseDto> Defenses { get; set; } = new List<CombatDefenseDto>();
     }
 
     public class CombatPawnDto
@@ -41,6 +42,16 @@ namespace RIMAPI.Models
         public float Sight { get; set; }
         public float Pain { get; set; }
         public float MarketValue { get; set; }
+        public float CombatPower { get; set; }
+        public float WeaponRange { get; set; }
+        public int? CarryingPawnId { get; set; }
+        public float Psyfocus { get; set; }
+        public float TargetPsyfocus { get; set; }
+        public float NeuralHeat { get; set; }
+        public float NeuralHeatLimit { get; set; }
+        public float PsychicSensitivity { get; set; }
+        public int PsylinkLevel { get; set; }
+        public List<PsycastDto> Psycasts { get; set; } = new List<PsycastDto>();
         public int SocialSkill { get; set; }
         public int MedicineSkill { get; set; }
         public int ConstructionSkill { get; set; }

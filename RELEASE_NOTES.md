@@ -39,9 +39,15 @@ Highlights:
 - normal RimWorld jobs and designations, with no spawning or instant construction;
 - food, farming, storage, rooms, animals, health, research, industry, trade, caravans and long-term starflight planning;
 - contextual combat handling for staging raids, insects and mechanoids;
+- a separate combat-planning module with 28 tactics tied to live cover, doors, traps, turrets, mortars and fallback defenses;
+- strict friendly-trap path inspection for every tactical reposition order;
+- complete live psycast context and nested caster/ability choice with focus, cooldown, target and neural-heat validation;
+- dynamic incident catalogue and an extensible event director covering combat, disease, fire, climate, crops, power loss, arrivals, resources, wildlife, psychic effects, quests, Anomaly events and unknown mod events;
+- kidnapped-pawn tracking, rescue-quest acceptance and reserve-aware caravans to actual quest sites;
+- autonomous visiting/orbital trader selection and normal reserve-aware transactions using current stock and departure time;
 - Ancient Danger is treated as a sealed strategic site, not a raid, and verified threat auto-pauses are resumed after a decision;
 - persistent doctrine covering settlement form, materials, economy, diplomacy, military emphasis and beauty;
 - in-game decision overlay and Windows control center with exportable history;
-- 25 automated Python tests and a reproducible modified RIMAPI source tree.
+- 50 automated Python tests and a reproducible modified RIMAPI source tree.
 
 This is an experiment, not a promise of competent play. Back up your saves.

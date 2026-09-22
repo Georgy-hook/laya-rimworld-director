@@ -12,6 +12,7 @@ from typing import Any
 import rimworld_laya as bridge
 import colony_architect as architect
 import colony_professions as professions
+import colony_events as events
 
 
 RESEARCH_ROUTE = [
@@ -3359,6 +3360,263 @@ def run_development_cycle(client: bridge.RimApiClient, agent: Any, state: dict[s
     return record
 
 
+def _event_quest(context: dict[str, Any], event: dict[str, Any]) -> dict[str, Any] | None:
+    quests = [row for row in context.get("active_quests") or [] if isinstance(row, dict)]
+    event_id = event.get("id") if event.get("source") == "quest" else None
+    if event_id is not None:
+        exact = next((row for row in quests if int(row.get("id", -1)) == int(event_id)), None)
+        if exact:
+            return exact
+    rescue = [row for row in quests if events.classify_event(row) == "kidnap_rescue"]
+    return rescue[0] if rescue else (quests[0] if quests else None)
+
+
+def _execute_event_response(
+    client: bridge.RimApiClient,
+    snapshot: dict[str, Any],
+    map_state: dict[str, Any],
+    event: dict[str, Any],
+    context: dict[str, Any],
+    response: str,
+    details: dict[str, Any],
+) -> Any:
+    map_id = int(snapshot["map"]["id"])
+    tick = int(snapshot["game"].get("tick") or 0)
+    if response in {"observe_event", "skip_trade", "defer_rescue", "defer_quest", "evaluate_animals", "evaluate_recruit", "ask_laya_generic"}:
+        return {"applied": False, "reason": response}
+    if response == "delegate_to_combat_planner":
+        return {"applied": False, "reason": "The combat planner owns verified hostile pawns and will run on the next combat tick."}
+    if response == "prepare_undrafted":
+        commands = []
+        for pawn in snapshot.get("combat", {}).get("colonists", []):
+            if pawn.get("is_drafted"):
+                commands.append(client.post("/api/v1/pawn/edit/status", body={"pawn_id": int(pawn["id"]), "is_drafted": False}))
+        if snapshot.get("game", {}).get("is_paused"):
+            commands.append(client.post("/api/v1/game/speed", query={"speed": 1}))
+        return {"applied": bool(commands), "responses": commands}
+    if response == "prioritize_firefighting":
+        return prioritize(client, snapshot, "Firefighter")
+    if response == "prioritize_medical":
+        return prioritize(client, snapshot, "Doctor")
+    if response == "emergency_harvest":
+        plants = snapshot.get("development", {}).get("plants", [])
+        ids = [
+            int(row["id"]) for row in plants
+            if row.get("id") is not None and (
+                row.get("can_harvest") or row.get("is_harvestable")
+                or float(row.get("growth") or row.get("growth_progress") or 0) >= 0.95
+            )
+        ][:120]
+        if not ids:
+            return {"applied": False, "reason": "No verified mature plant is available for emergency harvest."}
+        return client.post("/api/v1/map/plants/harvest", body={"map_id": map_id, "plant_ids": ids})
+    if response == "pause_sowing":
+        results = []
+        for zone in snapshot.get("development", {}).get("zones", []):
+            if zone.get("allow_sow") is True:
+                results.append(client.post("/api/v1/map/zone/growing/sowing", body={"map_id": map_id, "zone_id": int(zone["id"]), "allow_sow": False}))
+        return {"applied": bool(results), "responses": results}
+    if response == "collect_event_resources":
+        forbidden = snapshot.get("development", {}).get("forbidden", [])
+        ids = [int(row["id"]) for row in forbidden if row.get("id") is not None][:100]
+        if not ids:
+            return {"applied": False, "reason": "No forbidden event resource is currently visible."}
+        return client.post("/api/v1/things/set-forbidden", body={"map_id": map_id, "thing_ids": ids, "forbidden": False})
+    if response in {"accept_rescue_quest", "accept_quest"}:
+        quest = _event_quest(context, event)
+        if not quest:
+            return {"applied": False, "reason": "No live quest matches this event."}
+        return client.post("/api/v1/quest/accept", body={"quest_id": int(quest["id"])})
+    if response == "prepare_rescue_mission":
+        quest = _event_quest(context, event)
+        if not quest:
+            return {"applied": False, "reason": "No rescue quest with a world target is active."}
+        responses = []
+        if not quest.get("ever_accepted"):
+            responses.append(client.post("/api/v1/quest/accept", body={"quest_id": int(quest["id"])}))
+        targets = [row for row in quest.get("look_targets") or [] if row.get("world_object_id") is not None]
+        if not targets:
+            return {"applied": bool(responses), "reason": "Quest accepted, but no visitable rescue site exists yet.", "responses": responses}
+        target = min(targets, key=lambda row: float(row.get("estimated_threat_points") or 0))
+        responses.append(client.post("/api/v1/world/caravan/rescue/start", body={
+            "map_id": map_id,
+            "quest_id": int(quest["id"]),
+            "site_id": int(target["world_object_id"]),
+            "minimum_home_defenders": 2,
+            "minimum_food_at_home": max(20, len(snapshot.get("colonists", [])) * 5),
+            "minimum_medicine_at_home": 8,
+        }))
+        map_state["rescue_mission"] = {"quest_id": int(quest["id"]), "site_id": int(target["world_object_id"]), "started_tick": tick}
+        return {"applied": True, "responses": responses}
+    if response == "trade_now":
+        trader_id = str(details.get("trader_id") or "")
+        if not any(str(row.get("id")) == trader_id for row in context.get("trade_opportunities") or []):
+            return {"applied": False, "reason": "The selected trader has departed."}
+        sale = str(details.get("sale_category") or "none")
+        purchase = str(details.get("purchase_priority") or "none")
+        body = {
+            "map_id": map_id,
+            "trader_id": trader_id,
+            "sale_categories": [] if sale == "none" else [sale],
+            "purchase_priorities": [] if purchase == "none" else [purchase],
+            "minimum_silver_reserve": 300,
+            "maximum_spend": 1800,
+        }
+        return client.post("/api/v1/trade/execute", body=body)
+    if response in {"power_emergency", "weather_emergency", "psychic_schedule_response", "contain_anomaly", "use_opportunity", "rescue_arrival"}:
+        if snapshot.get("game", {}).get("is_paused"):
+            return client.post("/api/v1/game/speed", query={"speed": 1})
+        return {"applied": False, "reason": f"{response}: context recorded; no universally safe forced order exists."}
+    raise bridge.RimApiError(f"Unknown event response: {response}")
+
+
+def publish_event_overlay(client: bridge.RimApiClient, event: dict[str, Any], options: dict[str, str], answer: dict[str, Any], result: Any) -> None:
+    choice = str(answer.get("choice") or "observe_event")
+    probabilities = answer.get("probabilities") or {}
+    lines = [
+        "LAYA — СОБЫТИЕ",
+        f"{event.get('label') or event.get('name') or event.get('def_name') or event.get('incident_def')}",
+        f"Семейство: {event.get('family')} | источник: {event.get('source')}",
+        "",
+        "Варианты:",
+    ]
+    for name in options:
+        score = probabilities.get(name)
+        suffix = f" {float(score) * 100:.1f}%" if score is not None else ""
+        lines.append(f"{'> ' if name == choice else '  '}{name}{suffix}")
+    lines.extend(["", f"Решение: {choice}", f"Результат: {str(result)[:180]}"])
+    client.post("/api/v1/ui/announce", body={"text": "\n".join(lines), "duration": 15.0, "color": "#F3E6FF", "scale": 1.0, "panel": True})
+
+
+def run_event_cycle(
+    client: bridge.RimApiClient,
+    agent: Any,
+    state: dict[str, Any],
+    state_path: Path,
+    log_path: Path,
+) -> dict[str, Any] | None:
+    snapshot = collect_development(client, bridge.collect_snapshot(client))
+    seed = str(snapshot["map"].get("seed") or snapshot["map"]["id"])
+    map_state = state.setdefault("maps", {}).setdefault(seed, {"issued": {}})
+    context = bridge.safe_get(client, "/api/v1/events/context", snapshot.setdefault("warnings", []), map_id=snapshot["map"]["id"]) or {}
+    tick = int(snapshot["game"].get("tick") or 0)
+    history = map_state.setdefault("handled_events", {})
+    history = {str(key): int(value) for key, value in history.items() if tick - int(value) < 120000}
+    map_state["handled_events"] = history
+    pending = events.pending_events(context, set(history))
+    if not pending:
+        return None
+    event = pending[0]
+    options = events.response_options(event, context)
+    raw = agent.predict(events.event_context_for_model(event, context, snapshot), {
+        "event_response": {
+            "type": "choice",
+            "instructions": "Choose one proportional response to this verified live event. Prefer reversible normal-game actions and preserve food, medicine, defenders and deadlines.",
+            "criteria": options,
+        }
+    })
+    answer = raw.get("answers", {}).get("event_response", {})
+    response = str(answer.get("choice") or "")
+    if response not in options:
+        response = next(iter(options))
+        answer["choice"] = response
+    details: dict[str, Any] = {}
+    if response == "trade_now":
+        traders = context.get("trade_opportunities") or []
+        trader_question = {"event_trader": {
+            "type": "choice",
+            "instructions": "Choose the exact live trader using remaining time, stock, negotiator skill and orbital infrastructure.",
+            "criteria": {
+                str(row["id"]): f"{row.get('name')} ({row.get('trader_kind')}); orbital={row.get('orbital')}; departs in {row.get('ticks_until_departure')} ticks; stock {[(item.get('label'), item.get('count')) for item in (row.get('stock') or [])[:18]]}"
+                for row in traders if row.get("id")
+            },
+        }}
+        if trader_question["event_trader"]["criteria"]:
+            trader_raw = agent.predict(events.event_context_for_model(event, context, snapshot), trader_question)
+            trader_id = str(trader_raw.get("answers", {}).get("event_trader", {}).get("choice") or "")
+            if trader_id not in trader_question["event_trader"]["criteria"]:
+                trader_id = next(iter(trader_question["event_trader"]["criteria"]))
+            details["trader_id"] = trader_id
+            policy_raw = agent.predict(events.event_context_for_model(event, context, snapshot), {
+                "sale_category": {"type": "choice", "instructions": "Choose one surplus category to sell; hard-coded reserves protect survival stocks.", "criteria": {
+                    "none": "Buy only", "drugs": "Surplus drugs", "apparel": "Apparel", "art": "Sculptures", "animals": "Animals", "food": "Surplus food", "leather": "Leather/textiles", "weapons": "Spare weapons", "gold": "Precious resources",
+                }},
+                "purchase_priority": {"type": "choice", "instructions": "Choose the highest-value purchase need within the spending cap and silver reserve.", "criteria": {
+                    "none": "Sell only", "medicine": "Medicine/neutroamine", "components": "Industrial components", "advanced_components": "Advanced components", "food": "Emergency food", "weapons": "Weapons", "armor": "Armor", "plasteel": "Plasteel",
+                }},
+            })
+            details["sale_category"] = str(policy_raw.get("answers", {}).get("sale_category", {}).get("choice") or "none")
+            details["purchase_priority"] = str(policy_raw.get("answers", {}).get("purchase_priority", {}).get("choice") or "none")
+            raw["trade"] = {"trader": trader_raw, "policy": policy_raw}
+    result = _execute_event_response(client, snapshot, map_state, event, context, response, details)
+    # Quest acceptance is phase one; a fresh snapshot must be allowed to offer
+    # the newly created/updated rescue site on the next cycle.
+    if response != "accept_rescue_quest":
+        history[event["signature"]] = tick
+    try:
+        publish_event_overlay(client, event, options, answer, result)
+    except bridge.RimApiError as exc:
+        snapshot.setdefault("warnings", []).append(str(exc))
+    record = {
+        "timestamp": bridge.utc_now(), "mode": "event-director", "map_seed": seed,
+        "event": event, "options": options, "decision": {"choice": response, "raw": raw, **details}, "result": result,
+    }
+    save_state(state_path, state)
+    bridge.append_log(log_path, record)
+    return record
+
+
+def run_rescue_site_cycle(
+    client: bridge.RimApiClient,
+    state: dict[str, Any],
+    state_path: Path,
+    log_path: Path,
+    snapshot: dict[str, Any],
+) -> dict[str, Any] | None:
+    active_plans = [
+        map_state for map_state in state.setdefault("maps", {}).values()
+        if isinstance(map_state, dict) and map_state.get("rescue_mission")
+    ]
+    if not active_plans or not snapshot.get("map", {}).get("is_temp_incident_map"):
+        return None
+    status = client.get("/api/v1/world/rescue/site/status", map_id=int(snapshot["map"]["id"]))
+    if status.get("active_threat"):
+        return None
+    if status.get("captive_pawn_ids"):
+        release_active = any(
+            "releaseprisoner" in str(pawn.get("current_job") or "").replace("_", "").lower()
+            for pawn in snapshot.get("combat", {}).get("colonists", [])
+        )
+        if release_active:
+            result = {"applied": False, "reason": "normal prisoner release job is still active"}
+            phase = "wait-for-release"
+        else:
+            result = client.post("/api/v1/world/rescue/site/secure", body={"map_id": int(snapshot["map"]["id"])})
+            phase = "free-captive"
+    elif status.get("can_return_home"):
+        result = client.post("/api/v1/world/rescue/site/return", body={"map_id": int(snapshot["map"]["id"])})
+        phase = "return-home"
+        for map_state in active_plans:
+            map_state["last_rescue_mission"] = map_state.pop("rescue_mission")
+            map_state["last_rescue_mission"]["completed_tick"] = int(snapshot["game"].get("tick") or 0)
+    else:
+        return None
+    record = {
+        "timestamp": bridge.utc_now(), "mode": "rescue-site", "phase": phase,
+        "status": status, "result": result,
+    }
+    try:
+        client.post("/api/v1/ui/announce", body={
+            "text": f"LAYA — СПАСАТЕЛЬНАЯ ОПЕРАЦИЯ\nЭтап: {phase}\nПленники: {', '.join(status.get('captive_names') or []) or 'освобождены'}",
+            "duration": 12.0, "color": "#CFFFE0", "scale": 1.0, "panel": True,
+        })
+    except bridge.RimApiError:
+        pass
+    save_state(state_path, state)
+    bridge.append_log(log_path, record)
+    return record
+
+
 def run_downed_raider_cycle(
     client: bridge.RimApiClient,
     agent: Any,
@@ -3718,14 +3976,25 @@ def main() -> int:
                     last_combat_signature = None
                     last_combat_record = None
                     now = time.monotonic()
-                    ancient = get_ancient_danger(client, snapshot["map"]["id"])
+                    rescue_record = run_rescue_site_cycle(client, state, args.state, args.log, snapshot)
+                    away_site = bool(snapshot.get("map", {}).get("is_temp_incident_map"))
+                    if rescue_record is not None:
+                        next_colony_cycle = now + args.interval
+                        print(f"[{rescue_record['timestamp']}] rescue site: {rescue_record['phase']} | {rescue_record['result']}", flush=True)
+                    ancient = get_ancient_danger(client, snapshot["map"]["id"]) if rescue_record is None and not away_site else {}
                     ancient_record = None
+                    event_record = None
                     if ancient.get("detected") and ancient.get("sealed"):
                         ancient_record = run_ancient_danger_cycle(client, agent, state, args.state, args.log, ancient)
                         if ancient_record is not None:
                             next_colony_cycle = now + args.interval
                             print(f"[{ancient_record['timestamp']}] ancient danger: {ancient_record['decision']['choice']}", flush=True)
-                    if ancient_record is None and now >= next_colony_cycle:
+                    if rescue_record is None and ancient_record is None and not away_site and now >= next_colony_cycle:
+                        event_record = run_event_cycle(client, agent, state, args.state, args.log)
+                        if event_record is not None:
+                            next_colony_cycle = now + args.interval
+                            print(f"[{event_record['timestamp']}] event: {event_record['decision']['choice']} | {event_record['result']}", flush=True)
+                    if rescue_record is None and ancient_record is None and event_record is None and not away_site and now >= next_colony_cycle:
                         record = run_development_cycle(client, agent, state, args.state, args.log)
                         next_colony_cycle = now + args.interval
                         print(f"[{record['timestamp']}] colony: {record['decision']['choice']} | {record['result']}", flush=True)

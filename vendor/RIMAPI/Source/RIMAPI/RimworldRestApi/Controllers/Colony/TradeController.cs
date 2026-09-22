@@ -3,6 +3,9 @@ using System.Net;
 using RIMAPI.Core;
 using RIMAPI.Services;
 using System;
+using RIMAPI.Helpers;
+using RIMAPI.Models;
+using RIMAPI.Http;
 
 namespace RIMAPI.Controllers
 {
@@ -28,6 +31,22 @@ namespace RIMAPI.Controllers
                 priority: CachePriority.Normal,
                 expirationType: CacheExpirationType.Absolute
             );
+        }
+
+        [Get("/api/v1/trade/opportunities")]
+        [EndpointMetadata("List live visiting and orbital traders with remaining time and visible stock")]
+        public async Task GetTradeOpportunities(HttpListenerContext context)
+        {
+            var mapId = RequestParser.GetMapId(context);
+            await context.SendJsonResponse(LiveTradeAutomationHelper.GetOpportunities(mapId));
+        }
+
+        [Post("/api/v1/trade/execute")]
+        [EndpointMetadata("Execute a reserve-aware normal trade with a selected live trader")]
+        public async Task ExecuteTrade(HttpListenerContext context)
+        {
+            var body = await context.Request.ReadBodyAsync<LiveTradeRequestDto>();
+            await context.SendJsonResponse(LiveTradeAutomationHelper.Execute(body));
         }
     }
 }

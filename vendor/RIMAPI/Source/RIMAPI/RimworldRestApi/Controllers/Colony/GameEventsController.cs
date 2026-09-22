@@ -4,6 +4,7 @@ using RIMAPI.Core;
 using RIMAPI.Http;
 using RIMAPI.Models;
 using RIMAPI.Services;
+using RIMAPI.Helpers;
 
 namespace RIMAPI.Controllers
 {
@@ -64,6 +65,29 @@ namespace RIMAPI.Controllers
             var requestData = await context.Request.ReadBodyAsync<IncidentChanceRequestDto>();
             var result = _incidentService.GetIncidentChance(requestData);
             await context.SendJsonResponse(result);
+        }
+
+        [Get("/api/v1/events/catalog")]
+        [EndpointMetadata("List every loaded vanilla, DLC and mod incident definition")]
+        public async Task GetEventCatalog(HttpListenerContext context)
+        {
+            await context.SendJsonResponse(GameEventAutomationHelper.GetCatalog());
+        }
+
+        [Get("/api/v1/events/context")]
+        [EndpointMetadata("Get recent incidents, active conditions, quests, letters, kidnapped pawns and live traders")]
+        public async Task GetEventContext(HttpListenerContext context)
+        {
+            var mapId = RequestParser.GetMapId(context);
+            await context.SendJsonResponse(GameEventAutomationHelper.GetContext(mapId));
+        }
+
+        [Post("/api/v1/quest/accept")]
+        [EndpointMetadata("Accept a selected live quest through the normal quest system")]
+        public async Task AcceptQuest(HttpListenerContext context)
+        {
+            var body = await context.Request.ReadBodyAsync<QuestActionRequestDto>();
+            await context.SendJsonResponse(GameEventAutomationHelper.AcceptQuest(body));
         }
     }
 }
