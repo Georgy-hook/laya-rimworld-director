@@ -29,7 +29,7 @@ Weights guide ordering and model context. They cannot override emergency gates, 
 
 Normal logging keeps compact decisions, outcomes and probability paths. Technical logging additionally records the complete development snapshot/details; combat logging keeps full snapshots only in technical mode.
 
-The director writes a separate UTC heartbeat with its PID and current state. The GUI reports loading, waiting for a colony, running, decision errors and an unresponsive process independently; an old but still-live PID can no longer masquerade as a healthy autopilot. The HUD preference is read on every publication, so hiding it takes effect without stopping Laya. Compact mode renders a smaller RimWorld panel with up to five yellow probability bars.
+The director writes a separate UTC heartbeat with its PID and current state. The GUI reports loading, waiting for a colony, running, decision errors and an unresponsive process independently; an old but still-live PID can no longer masquerade as a healthy autopilot. The HUD preference is read on every publication, so hiding it takes effect without stopping Laya. Compact mode renders a smaller RimWorld panel with up to five thin yellow probability bars. High-contrast labels and percentages sit above each bar, whose width is the model's real probability rather than an equalized decorative value.
 
 All calls into the Laya decision model pass through one guard. Questions with exactly one feasible answer are accepted deterministically and recorded with probability 1.0 without invoking the model; questions with no feasible answer are rejected as planner errors. Laya therefore receives only genuine decisions with at least two alternatives.
 

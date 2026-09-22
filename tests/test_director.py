@@ -106,6 +106,18 @@ class DirectorTests(unittest.TestCase):
             "tendable_now": True,
         }))
 
+    def test_hungry_mobile_animal_is_not_forced_into_patient_feeding(self):
+        self.assertFalse(director.animal_needs_assisted_feeding({
+            "hunger": 0.2,
+            "downed": False,
+            "current_job": "GotoWander",
+        }))
+        self.assertTrue(director.animal_needs_assisted_feeding({
+            "hunger": 0.2,
+            "downed": True,
+            "current_job": "LayDown",
+        }))
+
     def test_decodes_rle_terrain(self):
         width, height, cells = director.decode_terrain({
             "width": 3,

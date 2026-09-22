@@ -197,7 +197,7 @@ Reproducible Windows GUI binaries (creates a separate build environment):
 
 The same command assembles `dist/rimworld-autopilot-0.0.2.zip` and compiles `dist/RimWorld-Autopilot-0.0.2-Setup.exe` with Inno Setup 6.7+. The installer embeds the complete payload, a temporary post-install configuration assistant, the custom portrait artwork and standard Windows uninstall metadata.
 
-The 0.0.2 development branch passes 69 Python tests, smoke-tests both Tk applications and compiles the C# mod with zero warnings/errors.
+The 0.0.2 development branch passes 70 Python tests, smoke-tests both Tk applications and compiles the C# mod with zero warnings/errors.
 
 ## Data and privacy
 

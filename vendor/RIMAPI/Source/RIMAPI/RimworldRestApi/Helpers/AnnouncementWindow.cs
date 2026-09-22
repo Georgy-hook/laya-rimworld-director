@@ -66,12 +66,14 @@ namespace RIMAPI.UI
                 return;
             }
 
-            Text.Font = _panel ? (_compact ? GameFont.Tiny : GameFont.Small) : GameFont.Medium;
-            Text.Anchor = _panel ? TextAnchor.UpperLeft : TextAnchor.MiddleCenter;
-
             // Save state
             Color oldColor = GUI.color;
             Matrix4x4 oldMatrix = GUI.matrix;
+            GameFont oldFont = Text.Font;
+            TextAnchor oldAnchor = Text.Anchor;
+
+            Text.Font = _panel ? (_compact ? GameFont.Tiny : GameFont.Small) : GameFont.Medium;
+            Text.Anchor = _panel ? TextAnchor.UpperLeft : TextAnchor.MiddleCenter;
 
             // Apply style
             GUI.color = _color;
@@ -80,7 +82,10 @@ namespace RIMAPI.UI
                 float width = Mathf.Min(_compact ? 430f : 560f, Verse.UI.screenWidth - 40f);
                 float contentWidth = width - 24f;
                 float textHeight = Mathf.Max(24f, Text.CalcHeight(_text, contentWidth));
-                float barsHeight = _bars.Count > 0 ? _bars.Count * (_compact ? 24f : 28f) + 8f : 0f;
+                float labelHeight = _compact ? 19f : 22f;
+                float trackHeight = _compact ? 5f : 7f;
+                float rowStride = labelHeight + trackHeight + 7f;
+                float barsHeight = _bars.Count > 0 ? _bars.Count * rowStride + 8f : 0f;
                 float desiredHeight = 24f + textHeight + barsHeight;
                 float height = Mathf.Min(
                     Mathf.Max(_compact ? 118f : 180f, desiredHeight),
@@ -95,25 +100,40 @@ namespace RIMAPI.UI
                 Widgets.Label(new Rect(inner.x, inner.y, inner.width, textHeight), _text);
 
                 float y = inner.y + textHeight + 8f;
-                float rowHeight = _compact ? 20f : 24f;
                 Color selectedYellow = new Color(1f, 0.78f, 0.22f, 1f);
                 Color quietYellow = new Color(0.78f, 0.62f, 0.24f, 0.82f);
                 foreach (OverlayBarDto bar in _bars)
                 {
-                    if (y + rowHeight > panelRect.yMax - 8f) break;
+                    if (y + rowStride > panelRect.yMax - 8f) break;
                     float value = Mathf.Clamp01(bar.Value);
-                    Rect track = new Rect(inner.x, y, inner.width, rowHeight);
+                    string label = string.IsNullOrEmpty(bar.Label) ? "—" : bar.Label;
+                    string percentage = (value * 100f).ToString("0.0") + "%";
+                    Rect labelRect = new Rect(inner.x, y, inner.width - 66f, labelHeight);
+                    Rect percentageRect = new Rect(inner.xMax - 62f, y, 62f, labelHeight);
+
+                    // Keep the labels above the fill so white text never disappears into yellow.
+                    // A small shadow plus a second sub-pixel pass gives RimWorld's font more weight.
+                    Text.Font = GameFont.Small;
+                    Text.Anchor = TextAnchor.MiddleLeft;
+                    GUI.color = new Color(0f, 0f, 0f, 0.9f);
+                    Widgets.Label(new Rect(labelRect.x + 1f, labelRect.y + 1f, labelRect.width, labelRect.height), label);
+                    Text.Anchor = TextAnchor.MiddleRight;
+                    Widgets.Label(new Rect(percentageRect.x + 1f, percentageRect.y + 1f, percentageRect.width, percentageRect.height), percentage);
+                    GUI.color = Color.white;
+                    Text.Anchor = TextAnchor.MiddleLeft;
+                    Widgets.Label(labelRect, label);
+                    Widgets.Label(new Rect(labelRect.x + 0.45f, labelRect.y, labelRect.width, labelRect.height), label);
+                    Text.Anchor = TextAnchor.MiddleRight;
+                    Widgets.Label(percentageRect, percentage);
+                    Widgets.Label(new Rect(percentageRect.x + 0.45f, percentageRect.y, percentageRect.width, percentageRect.height), percentage);
+
+                    Rect track = new Rect(inner.x, y + labelHeight + 2f, inner.width, trackHeight);
                     GUI.color = Color.white;
                     Widgets.DrawBoxSolid(track, new Color(0.11f, 0.12f, 0.15f, 0.96f));
                     Color fill = bar.Selected ? selectedYellow : quietYellow;
+                    // The fill uses the model's probability directly; alternatives are never equalized.
                     Widgets.DrawBoxSolid(new Rect(track.x, track.y, track.width * value, track.height), fill);
-                    GUI.color = Color.white;
-                    Text.Anchor = TextAnchor.MiddleLeft;
-                    string label = string.IsNullOrEmpty(bar.Label) ? "—" : bar.Label;
-                    Widgets.Label(new Rect(track.x + 6f, track.y, track.width - 58f, track.height), label);
-                    Text.Anchor = TextAnchor.MiddleRight;
-                    Widgets.Label(new Rect(track.x + track.width - 54f, track.y, 48f, track.height), (value * 100f).ToString("0.0") + "%");
-                    y += rowHeight + 4f;
+                    y += rowStride;
                 }
             }
             else
@@ -126,7 +146,8 @@ namespace RIMAPI.UI
             // Restore state
             GUI.matrix = oldMatrix;
             GUI.color = oldColor;
-            Text.Anchor = TextAnchor.UpperLeft;
+            Text.Font = oldFont;
+            Text.Anchor = oldAnchor;
         }
     }
 }

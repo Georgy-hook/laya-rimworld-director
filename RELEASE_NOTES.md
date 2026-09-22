@@ -13,7 +13,8 @@ Highlights:
 - compact normal logs plus opt-in diagnostic snapshots in technical logging mode;
 - heartbeat-based process health, so the GUI distinguishes loading, waiting, decision errors and a hung director instead of trusting PID existence alone;
 - a closed or still-starting RimWorld/RIMAPI connection is reported as waiting for the game, not as a Laya decision-cycle failure;
-- optional compact in-game HUD with yellow probability bars and an immediate hide switch in Settings;
+- optional compact in-game HUD with thin, true-scale yellow probability bars, heavier labels above the fills, and an immediate hide switch in Settings;
+- assisted animal feeding is offered only to downed or resting patients; a stale impossible feed order is skipped instead of trapping the director in an error loop;
 - a central decision guard that resolves a sole feasible action without calling Laya, guaranteeing that the model only receives choices with at least two real alternatives;
 - standard dark/light Windows installer with custom portrait art, Program Files destination, optional desktop shortcut, temporary configuration assistant, registered Installed-apps entry and normal uninstaller;
 - audited doctrine v2 with 30 strategic archetypes covering Core, Royalty, Ideology, Biotech, Anomaly and Odyssey;

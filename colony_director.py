@@ -927,6 +927,15 @@ def animal_needs_tending(animal: dict[str, Any]) -> bool:
     return bool(animal.get("tendable_now")) or float(animal.get("bleeding_rate") or 0.0) > 0.0
 
 
+def animal_needs_assisted_feeding(animal: dict[str, Any]) -> bool:
+    """Only patients that cannot walk to food should receive a forced feed job."""
+    current_job = str(animal.get("current_job") or "").lower()
+    is_patient = bool(animal.get("downed")) or any(
+        marker in current_job for marker in ("laydown", "patient", "bedrest")
+    )
+    return is_patient and float(animal.get("hunger") or 1.0) < 0.35
+
+
 def available_sale_categories(snapshot: dict[str, Any]) -> list[str]:
     found: set[str] = set()
     for row in snapshot.get("development", {}).get("things", []):
@@ -1142,7 +1151,7 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
         key=lambda animal: (float(animal.get("health") or 1.0), -float(animal.get("bleeding_rate") or 0.0)),
     )
     hungry_animals = sorted(
-        (animal for animal in colony_animals if float(animal.get("hunger") or 1.0) < 0.35),
+        (animal for animal in colony_animals if animal_needs_assisted_feeding(animal)),
         key=lambda animal: float(animal.get("hunger") or 1.0),
     )
     animal_emergency: list[str] = []
@@ -2998,7 +3007,20 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
         body: dict[str, Any] = {"patient_pawn_id": animal_id}
         if feeder is not None:
             body["feeder_pawn_id"] = int(feeder["id"])
-        response = client.post("/api/v1/pawn/medical/feed", body=body)
+        try:
+            response = client.post("/api/v1/pawn/medical/feed", body=body)
+        except bridge.RimApiError as exc:
+            # The patient's state can change between observation and execution
+            # (for example, an animal stands up and can eat by itself). Treat that
+            # race as a skipped order instead of crashing every following cycle.
+            issued[f"animal_feed:{animal_id}"] = tick
+            return {
+                "applied": False,
+                "skipped": "patient_feeding_unavailable",
+                "animal": details.get("hungry_animal_name", animal_id),
+                "feeder": feeder.get("name") if feeder else "automatic",
+                "error": str(exc),
+            }
         issued[f"animal_feed:{animal_id}"] = tick
         return {
             "applied": True,
