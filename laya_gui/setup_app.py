@@ -176,7 +176,7 @@ class SetupWindow(tk.Tk):
             messagebox.showerror(self.t("title"), self.t("invalid"))
             return
         source = _source_root().resolve()
-        if install_dir == source or source in install_dir.parents:
+        if source in install_dir.parents:
             messagebox.showerror(self.t("title"), self.t("invalid_install"))
             return
         python = self._find_python()
@@ -255,7 +255,8 @@ class SetupWindow(tk.Tk):
         try:
             source_root = _source_root().resolve()
             self._emit("status", self.t("step_copy"))
-            self._copy_payload(source_root, install_dir)
+            if source_root != install_dir:
+                self._copy_payload(source_root, install_dir)
             venv = install_dir / ".venv"
             venv_python = venv / "Scripts" / "python.exe"
             self._emit("status", self.t("step_python"))
