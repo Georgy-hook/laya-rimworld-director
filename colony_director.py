@@ -14,6 +14,7 @@ import colony_architect as architect
 import colony_professions as professions
 import colony_events as events
 import colony_strategy as strategy
+import laya_preferences
 
 
 RESEARCH_ROUTE = [
@@ -1926,6 +1927,7 @@ def build_decision_state(snapshot: dict[str, Any]) -> dict[str, Any]:
     dev = snapshot.get("development", {})
     return {
         "goal": "A self-sufficient colony pursuing its saved doctrine and chosen long-term ending.",
+        "player_preferences": laya_preferences.model_context(dev.get("user_preferences") or laya_preferences.load_preferences()),
         "colony": {"date": snapshot.get("game", {}).get("date"), "wealth": snapshot.get("game", {}).get("wealth"), "population": len(people), "threats": snapshot.get("map", {}).get("enemies")},
         "resources": snapshot.get("map", {}).get("resources", {}),
         "people": people,
@@ -2102,7 +2104,8 @@ def choose_action(agent: Any, snapshot: dict[str, Any], candidates: list[str]) -
     state = build_decision_state(snapshot)
     raw_domain = None
     raw_family = None
-    considered = list(candidates)
+    player_preferences = snapshot.get("development", {}).get("user_preferences") or laya_preferences.load_preferences()
+    considered = sorted(candidates, key=lambda name: laya_preferences.priority_for_action(name, player_preferences), reverse=True)
     if len(candidates) > 18:
         domains: dict[str, list[str]] = {}
         for name in candidates:
@@ -2131,7 +2134,10 @@ def choose_action(agent: Any, snapshot: dict[str, Any], candidates: list[str]) -
         action_answer = {"choice": choice, "confidence": 1.0, "probabilities": {choice: 1.0}}
         mode = "single_feasible_action"
     else:
-        action_question = {"colony_goal_action": {"type": "choice", "instructions": "Choose the next concrete feasible action for survival and the saved long-term doctrine. Parameters of unchosen actions will not be asked.", "criteria": {name: action_description(name, snapshot) for name in considered}}}
+        action_question = {"colony_goal_action": {"type": "choice", "instructions": "Choose the next concrete feasible action for survival and the saved long-term doctrine. Respect the player's preference weights and personal guidance from state, but never bypass safety or feasibility. Parameters of unchosen actions will not be asked.", "criteria": {
+            name: f"{action_description(name, snapshot)} Player priority: {laya_preferences.priority_for_action(name, player_preferences)}/100."
+            for name in considered
+        }}}
         raw_action = agent.predict(state, action_question)
         action_answer = raw_action.get("answers", {}).get("colony_goal_action", {})
         choice = str(action_answer.get("choice") or "")
@@ -3370,6 +3376,8 @@ def execute_action(client: bridge.RimApiClient, snapshot: dict[str, Any], map_st
 
 def run_development_cycle(client: bridge.RimApiClient, agent: Any, state: dict[str, Any], state_path: Path, log_path: Path) -> dict[str, Any]:
     snapshot = collect_development(client, bridge.collect_snapshot(client))
+    player_preferences = laya_preferences.load_preferences()
+    snapshot["development"]["user_preferences"] = player_preferences
     seed = str(snapshot["map"].get("seed") or snapshot["map"]["id"])
     map_state = state.setdefault("maps", {}).setdefault(seed, {"issued": {}})
     snapshot["development"]["income_strategy"] = map_state.get("income_strategy")
@@ -3389,6 +3397,7 @@ def run_development_cycle(client: bridge.RimApiClient, agent: Any, state: dict[s
             find_terrain_rect(terrain, growing_center, 10, 8, {"Soil", "SoilRich"}, radius=45) or growing_center,
         )
     candidates, details = candidate_actions(client, snapshot, map_state)
+    candidates = laya_preferences.filter_candidates(candidates, player_preferences)
     decision = choose_action(agent, snapshot, candidates)
     for key in (
         "trade_purchase", "stone_type", "tame_target", "wild_plant_type", "hunt_target",
@@ -3419,6 +3428,8 @@ def run_development_cycle(client: bridge.RimApiClient, agent: Any, state: dict[s
         "decision": decision,
         "result": result,
     }
+    if player_preferences.get("technical_logging"):
+        record["technical"] = {"snapshot": snapshot, "details": details}
     save_state(state_path, state)
     bridge.append_log(log_path, record)
     return record
@@ -3572,7 +3583,9 @@ def run_event_cycle(
         return None
     event = pending[0]
     options = events.response_options(event, context)
-    raw = agent.predict(events.event_context_for_model(event, context, snapshot), {
+    event_model_context = events.event_context_for_model(event, context, snapshot)
+    event_model_context["player_preferences"] = laya_preferences.model_context(laya_preferences.load_preferences())
+    raw = agent.predict(event_model_context, {
         "event_response": {
             "type": "choice",
             "instructions": "Choose one proportional response to this verified live event. Prefer reversible normal-game actions and preserve food, medicine, defenders and deadlines.",
@@ -3596,12 +3609,12 @@ def run_event_cycle(
             },
         }}
         if trader_question["event_trader"]["criteria"]:
-            trader_raw = agent.predict(events.event_context_for_model(event, context, snapshot), trader_question)
+            trader_raw = agent.predict(event_model_context, trader_question)
             trader_id = str(trader_raw.get("answers", {}).get("event_trader", {}).get("choice") or "")
             if trader_id not in trader_question["event_trader"]["criteria"]:
                 trader_id = next(iter(trader_question["event_trader"]["criteria"]))
             details["trader_id"] = trader_id
-            policy_raw = agent.predict(events.event_context_for_model(event, context, snapshot), {
+            policy_raw = agent.predict(event_model_context, {
                 "sale_category": {"type": "choice", "instructions": "Choose one surplus category to sell; hard-coded reserves protect survival stocks.", "criteria": {
                     "none": "Buy only", "drugs": "Surplus drugs", "apparel": "Apparel", "art": "Sculptures", "animals": "Animals", "food": "Surplus food", "leather": "Leather/textiles", "weapons": "Spare weapons", "gold": "Precious resources",
                 }},
@@ -3740,6 +3753,7 @@ def run_downed_raider_cycle(
     material_counts = snapshot["development"].get("item_counts", {})
     context = {
         "goal": "Resolve downed raiders while preserving colony survival and future growth.",
+        "player_preferences": laya_preferences.model_context(laya_preferences.load_preferences()),
         "colony": {
             "population": len(snapshot["colonists"]),
             "food": resources.get("food"),
@@ -3862,6 +3876,7 @@ def run_ancient_danger_cycle(
     resources = snapshot["map"]["resources"]
     context = {
         "event": "A proximity warning revealed a sealed Ancient Danger. This is not an active raid.",
+        "player_preferences": laya_preferences.model_context(laya_preferences.load_preferences()),
         "known_information": {
             "warning": status.get("notice"),
             "sealed": bool(status.get("sealed")),

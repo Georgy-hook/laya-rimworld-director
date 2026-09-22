@@ -1,0 +1,589 @@
+from __future__ import annotations
+
+import json
+import math
+import os
+import shutil
+import subprocess
+import sys
+import threading
+import tkinter as tk
+from datetime import datetime
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
+from urllib.error import URLError
+from typing import Any
+
+import colony_strategy as strategy
+import laya_preferences
+
+from .i18n import PRIORITY_TEXT, QUESTION_TEXT, doctrine_view, humanize, tr
+from .services import (
+    APP_NAME, BASE_DIR, PREFERENCES_PATH, RESOURCE_DIR, export_bundle, export_history,
+    load_config, read_pid, request_json, start_director, stop_director, tail_jsonl,
+    timestamped_export_name,
+)
+from .theme import COLORS, FONTS, ShadowCard, configure_styles, status_color
+
+
+class ControlCenter(tk.Tk):
+    def __init__(self) -> None:
+        super().__init__()
+        if os.environ.get("LAYA_GUI_SMOKE_TEST") == "1":
+            self.withdraw()
+        self.config_data = load_config()
+        self.log_dir = BASE_DIR / "logs"
+        self.log_path = self.log_dir / "decisions.jsonl"
+        self.state_path = self.log_dir / "colony-state.json"
+        self.pid_path = self.log_dir / "director.pid"
+        self.preferences = laya_preferences.load_preferences(PREFERENCES_PATH)
+        self.language = str(self.preferences.get("language") or "ru")
+        self.records: list[dict[str, Any]] = []
+        self.last_log_signature: tuple[int, int] | None = None
+        self.game_online = False
+        self.current_page = "overview"
+        self.animation_tick = 0
+        self.title(APP_NAME)
+        self.geometry("1320x820")
+        self.minsize(1040, 690)
+        self.configure(bg=COLORS["window"])
+        configure_styles(self)
+        self._build_ui()
+        self.after(150, self.refresh_all)
+        self.after(70, self._animate_mascot)
+
+    def _build_ui(self) -> None:
+        self.nav_buttons: dict[str, tk.Button] = {}
+        self.pages: dict[str, tk.Frame] = {}
+        self.priority_scales: dict[str, ttk.Scale] = {}
+        self.priority_values: dict[str, tk.Label] = {}
+        self._load_ui_variables()
+
+        shell = tk.Frame(self, bg=COLORS["window"])
+        shell.pack(fill="both", expand=True)
+        self.sidebar = tk.Frame(shell, bg=COLORS["sidebar"], width=232)
+        self.sidebar.pack(side="left", fill="y")
+        self.sidebar.pack_propagate(False)
+        tk.Frame(shell, bg=COLORS["shadow"], width=7).pack(side="left", fill="y")
+
+        self.main = tk.Frame(shell, bg=COLORS["window"])
+        self.main.pack(side="left", fill="both", expand=True)
+        self._build_sidebar()
+        self._build_header()
+        self.page_host = tk.Frame(self.main, bg=COLORS["window"])
+        self.page_host.pack(fill="both", expand=True, padx=24, pady=(4, 14))
+        self._build_overview_page()
+        self._build_strategy_page()
+        self._build_priorities_page()
+        self._build_history_page()
+        self._build_settings_page()
+        self.footer = tk.Label(self.main, text=tr(self.language, "ready"), bg=COLORS["sidebar"], fg=COLORS["muted"], anchor="w", padx=20, pady=8, font=FONTS["small"])
+        self.footer.pack(fill="x", side="bottom")
+        self.switch_page(self.current_page)
+
+    def _load_ui_variables(self) -> None:
+        self.tech_var = tk.BooleanVar(value=bool(self.preferences.get("technical_logging")))
+        safety = self.preferences.get("safety") or {}
+        self.avoid_attacks_var = tk.BooleanVar(value=bool(safety.get("avoid_unprovoked_attacks")))
+        self.peaceful_trade_var = tk.BooleanVar(value=bool(safety.get("prefer_peaceful_trade")))
+        self.protect_food_var = tk.BooleanVar(value=bool(safety.get("protect_food_reserve", True)))
+
+    def _build_sidebar(self) -> None:
+        self.mascot_canvas = tk.Canvas(self.sidebar, width=224, height=150, bg=COLORS["sidebar"], highlightthickness=0)
+        self.mascot_canvas.pack(pady=(12, 0))
+        self.mascot_canvas.create_oval(58, 122, 168, 139, fill="#080A10", outline="")
+        self.mascot_item = None
+        asset = RESOURCE_DIR / "assets" / "gui" / "laya-orbit-mascot.png"
+        try:
+            original = tk.PhotoImage(file=str(asset))
+            self.mascot_image = original.subsample(8, 8)
+            self.mascot_item = self.mascot_canvas.create_image(113, 74, image=self.mascot_image)
+        except tk.TclError:
+            self.mascot_image = None
+            self.mascot_canvas.create_text(112, 73, text="✦", fill=COLORS["cyan"], font=("Segoe UI Symbol", 46))
+        tk.Label(self.sidebar, text="LAYA", bg=COLORS["sidebar"], fg=COLORS["text"], font=("Segoe UI Black", 17)).pack()
+        tk.Label(self.sidebar, text="COLONY DIRECTOR", bg=COLORS["sidebar"], fg=COLORS["violet"], font=("Segoe UI Semibold", 8)).pack(pady=(0, 22))
+
+        icons = {"overview": "✦", "strategy": "◈", "priorities": "≋", "history": "◷", "settings": "⚙"}
+        for page in ("overview", "strategy", "priorities", "history", "settings"):
+            button = tk.Button(
+                self.sidebar, text=f" {icons[page]}   {tr(self.language, page)}", anchor="w",
+                bg=COLORS["sidebar"], fg=COLORS["muted"], activebackground=COLORS["panel_alt"], activeforeground=COLORS["text"],
+                relief="flat", bd=0, padx=22, pady=12, font=("Segoe UI Semibold", 10), cursor="hand2",
+                command=lambda name=page: self.switch_page(name),
+            )
+            button.pack(fill="x", padx=10, pady=2)
+            self.nav_buttons[page] = button
+
+        self.sidebar_status = tk.Label(self.sidebar, text="", bg=COLORS["sidebar"], fg=COLORS["muted"], justify="left", anchor="w", font=FONTS["small"])
+        self.sidebar_status.pack(side="bottom", fill="x", padx=20, pady=20)
+
+    def _build_header(self) -> None:
+        header = tk.Frame(self.main, bg=COLORS["window"])
+        header.pack(fill="x", padx=26, pady=(20, 10))
+        titles = tk.Frame(header, bg=COLORS["window"])
+        titles.pack(side="left", fill="x", expand=True)
+        self.page_title = tk.Label(titles, text="", bg=COLORS["window"], fg=COLORS["text"], font=FONTS["display"], anchor="w")
+        self.page_title.pack(anchor="w")
+        self.page_subtitle = tk.Label(titles, text="", bg=COLORS["window"], fg=COLORS["muted"], font=FONTS["body"], anchor="w")
+        self.page_subtitle.pack(anchor="w", pady=(2, 0))
+
+        self.language_button = tk.Button(
+            header, text="EN" if self.language == "ru" else "RU", command=lambda: self.set_language("en" if self.language == "ru" else "ru"),
+            bg=COLORS["panel_alt"], fg=COLORS["cyan"], activebackground=COLORS["line"], activeforeground=COLORS["cyan"],
+            relief="flat", bd=0, padx=12, pady=7, font=("Segoe UI Semibold", 9), cursor="hand2",
+        )
+        self.language_button.pack(side="right", padx=(10, 0))
+        self.game_chip = tk.Label(header, text=tr(self.language, "game_offline"), bg=COLORS["panel"], fg=COLORS["red"], padx=12, pady=7, font=("Segoe UI Semibold", 9))
+        self.game_chip.pack(side="right", padx=5)
+        self.laya_chip = tk.Label(header, text=tr(self.language, "laya_offline"), bg=COLORS["panel"], fg=COLORS["red"], padx=12, pady=7, font=("Segoe UI Semibold", 9))
+        self.laya_chip.pack(side="right", padx=5)
+
+    def _new_page(self, name: str) -> tk.Frame:
+        page = tk.Frame(self.page_host, bg=COLORS["window"])
+        self.pages[name] = page
+        return page
+
+    def _build_overview_page(self) -> None:
+        page = self._new_page("overview")
+        hero = ShadowCard(page, padx=22, pady=18)
+        hero.pack(fill="x", pady=(0, 14))
+        left = tk.Frame(hero.body, bg=COLORS["panel"])
+        left.pack(side="left", fill="both", expand=True)
+        tk.Label(left, text=tr(self.language, "current_course"), bg=COLORS["panel"], fg=COLORS["violet"], font=("Segoe UI Semibold", 10)).pack(anchor="w")
+        self.overview_course = tk.Label(left, text=tr(self.language, "no_doctrine"), bg=COLORS["panel"], fg=COLORS["text"], font=FONTS["title"], justify="left", anchor="w", wraplength=660)
+        self.overview_course.pack(anchor="w", pady=(5, 3))
+        self.overview_course_details = tk.Label(left, text="", bg=COLORS["panel"], fg=COLORS["muted"], font=FONTS["body"], justify="left", anchor="w", wraplength=700)
+        self.overview_course_details.pack(anchor="w")
+
+        controls = tk.Frame(hero.body, bg=COLORS["panel"])
+        controls.pack(side="right", padx=(20, 0))
+        ttk.Button(controls, text=tr(self.language, "start"), style="Accent.TButton", command=self.start_laya).grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 7))
+        ttk.Button(controls, text=tr(self.language, "stop"), style="Danger.TButton", command=self.stop_laya).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 7))
+        ttk.Button(controls, text=tr(self.language, "pause"), style="Soft.TButton", command=lambda: self.set_speed(0)).grid(row=2, column=0, padx=(0, 4))
+        ttk.Button(controls, text=tr(self.language, "resume"), style="Soft.TButton", command=lambda: self.set_speed(1)).grid(row=2, column=1, padx=(4, 0))
+
+        row = tk.Frame(page, bg=COLORS["window"])
+        row.pack(fill="both", expand=True)
+        latest = ShadowCard(row)
+        latest.pack(side="left", fill="both", expand=True, padx=(0, 7))
+        tk.Label(latest.body, text=tr(self.language, "latest_choice"), bg=COLORS["panel"], fg=COLORS["cyan"], font=FONTS["heading"]).pack(anchor="w")
+        self.latest_choice = tk.Label(latest.body, text=tr(self.language, "waiting"), bg=COLORS["panel"], fg=COLORS["text"], font=FONTS["title"], justify="left", anchor="nw", wraplength=430)
+        self.latest_choice.pack(fill="x", pady=(12, 6))
+        self.latest_result = tk.Label(latest.body, text="", bg=COLORS["panel"], fg=COLORS["muted"], font=FONTS["body"], justify="left", anchor="nw", wraplength=430)
+        self.latest_result.pack(fill="x")
+
+        content = ShadowCard(row)
+        content.pack(side="left", fill="both", expand=True, padx=(7, 0))
+        tk.Label(content.body, text=tr(self.language, "expansions"), bg=COLORS["panel"], fg=COLORS["amber"], font=FONTS["heading"]).pack(anchor="w")
+        self.content_summary = tk.Label(content.body, text="—", bg=COLORS["panel"], fg=COLORS["text"], font=FONTS["title"], justify="left", anchor="nw", wraplength=430)
+        self.content_summary.pack(fill="x", pady=(12, 6))
+        self.content_details = tk.Label(content.body, text="", bg=COLORS["panel"], fg=COLORS["muted"], font=FONTS["body"], justify="left", anchor="nw", wraplength=430)
+        self.content_details.pack(fill="x")
+
+    def _build_strategy_page(self) -> None:
+        page = self._new_page("strategy")
+        summary = ShadowCard(page)
+        summary.pack(fill="x", pady=(0, 14))
+        tk.Label(summary.body, text=tr(self.language, "current_course"), bg=COLORS["panel"], fg=COLORS["violet"], font=FONTS["heading"]).pack(anchor="w")
+        self.strategy_summary = tk.Label(summary.body, text=tr(self.language, "no_doctrine"), bg=COLORS["panel"], fg=COLORS["text"], font=FONTS["body"], justify="left", anchor="w", wraplength=950)
+        self.strategy_summary.pack(fill="x", pady=(10, 0))
+        catalog = ShadowCard(page)
+        catalog.pack(fill="both", expand=True)
+        tk.Label(catalog.body, text=tr(self.language, "available_directions"), bg=COLORS["panel"], fg=COLORS["cyan"], font=FONTS["heading"]).pack(anchor="w", pady=(0, 8))
+        self.direction_catalog = tk.Text(catalog.body, bg=COLORS["panel"], fg=COLORS["text"], relief="flat", bd=0, wrap="word", font=FONTS["body"], padx=2, pady=2, cursor="arrow")
+        self.direction_catalog.pack(fill="both", expand=True)
+        self.direction_catalog.configure(state="disabled")
+
+    def _build_priorities_page(self) -> None:
+        page = self._new_page("priorities")
+        grid = ShadowCard(page, padx=20, pady=16)
+        grid.pack(fill="x", pady=(0, 14))
+        priorities = self.preferences.get("priorities") or {}
+        for index, key in enumerate(laya_preferences.DEFAULT_PRIORITIES):
+            row, column = divmod(index, 2)
+            cell = tk.Frame(grid.body, bg=COLORS["panel"])
+            cell.grid(row=row, column=column, sticky="ew", padx=(0 if column == 0 else 20, 20 if column == 0 else 0), pady=8)
+            grid.body.grid_columnconfigure(column, weight=1)
+            title, help_text = PRIORITY_TEXT[self.language][key]
+            top = tk.Frame(cell, bg=COLORS["panel"])
+            top.pack(fill="x")
+            tk.Label(top, text=title, bg=COLORS["panel"], fg=COLORS["text"], font=("Segoe UI Semibold", 10)).pack(side="left")
+            value = tk.Label(top, text=str(int(priorities.get(key, 50))), bg=COLORS["panel"], fg=COLORS["cyan"], font=("Segoe UI Semibold", 10))
+            value.pack(side="right")
+            tk.Label(cell, text=help_text, bg=COLORS["panel"], fg=COLORS["muted"], font=FONTS["small"]).pack(anchor="w")
+            scale = ttk.Scale(cell, from_=0, to=100, value=int(priorities.get(key, 50)), command=lambda raw, name=key: self._priority_changed(name, raw))
+            scale.pack(fill="x", pady=(5, 0))
+            self.priority_scales[key] = scale
+            self.priority_values[key] = value
+
+        lower = tk.Frame(page, bg=COLORS["window"])
+        lower.pack(fill="both", expand=True)
+        note_card = ShadowCard(lower)
+        note_card.pack(side="left", fill="both", expand=True, padx=(0, 7))
+        tk.Label(note_card.body, text=tr(self.language, "personal_note"), bg=COLORS["panel"], fg=COLORS["violet"], font=FONTS["heading"]).pack(anchor="w")
+        tk.Label(note_card.body, text=tr(self.language, "personal_note_hint"), bg=COLORS["panel"], fg=COLORS["muted"], font=FONTS["small"], justify="left", wraplength=480).pack(anchor="w", pady=(4, 8))
+        self.personal_note = tk.Text(note_card.body, height=7, bg=COLORS["panel_alt"], fg=COLORS["text"], insertbackground=COLORS["cyan"], relief="flat", wrap="word", font=FONTS["body"], padx=10, pady=8)
+        self.personal_note.pack(fill="both", expand=True)
+        self.personal_note.insert("1.0", str(self.preferences.get("personal_note") or ""))
+
+        safety = ShadowCard(lower)
+        safety.pack(side="left", fill="both", expand=True, padx=(7, 0))
+        tk.Label(safety.body, text=tr(self.language, "safety"), bg=COLORS["panel"], fg=COLORS["amber"], font=FONTS["heading"]).pack(anchor="w", pady=(0, 8))
+        ttk.Checkbutton(safety.body, text=tr(self.language, "avoid_attacks"), variable=self.avoid_attacks_var).pack(anchor="w", pady=5)
+        ttk.Checkbutton(safety.body, text=tr(self.language, "peaceful_trade"), variable=self.peaceful_trade_var).pack(anchor="w", pady=5)
+        ttk.Checkbutton(safety.body, text=tr(self.language, "protect_food"), variable=self.protect_food_var).pack(anchor="w", pady=5)
+        actions = tk.Frame(safety.body, bg=COLORS["panel"])
+        actions.pack(side="bottom", fill="x", pady=(12, 0))
+        ttk.Button(actions, text=tr(self.language, "save"), style="Accent.TButton", command=self.save_priorities).pack(side="left")
+        ttk.Button(actions, text=tr(self.language, "reset"), style="Soft.TButton", command=self.reset_priorities).pack(side="right")
+
+    def _build_history_page(self) -> None:
+        page = self._new_page("history")
+        toolbar = tk.Frame(page, bg=COLORS["window"])
+        toolbar.pack(fill="x", pady=(0, 10))
+        ttk.Checkbutton(toolbar, text=tr(self.language, "technical_mode"), variable=self.tech_var, command=self.toggle_technical).pack(side="right")
+        history = ShadowCard(page, padx=10, pady=10)
+        history.pack(fill="both", expand=True)
+        columns = ("time", "choice", "confidence", "result")
+        self.tree = ttk.Treeview(history.body, columns=columns, show="headings", selectmode="browse", height=9)
+        headings = {"time": "Время" if self.language == "ru" else "Time", "choice": "Выбор Laya" if self.language == "ru" else "Laya's choice", "confidence": tr(self.language, "confidence"), "result": tr(self.language, "result")}
+        widths = {"time": 135, "choice": 360, "confidence": 110, "result": 360}
+        for name in columns:
+            self.tree.heading(name, text=headings[name])
+            self.tree.column(name, width=widths[name], anchor="w")
+        scroll = ttk.Scrollbar(history.body, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scroll.set)
+        self.tree.pack(side="top", fill="both", expand=True)
+        scroll.place(relx=1.0, rely=0, relheight=0.52, anchor="ne")
+        self.tree.bind("<<TreeviewSelect>>", self.show_selected)
+        tk.Label(history.body, text=tr(self.language, "details"), bg=COLORS["panel"], fg=COLORS["violet"], font=FONTS["heading"]).pack(anchor="w", pady=(12, 5))
+        self.details = tk.Text(history.body, height=9, bg=COLORS["panel_alt"], fg=COLORS["text"], relief="flat", font=FONTS["body"] if not self.tech_var.get() else FONTS["mono"], wrap="word", padx=12, pady=10, cursor="arrow")
+        self.details.pack(fill="both", expand=True)
+
+    def _build_settings_page(self) -> None:
+        page = self._new_page("settings")
+        row = tk.Frame(page, bg=COLORS["window"])
+        row.pack(fill="x")
+        language = ShadowCard(row)
+        language.pack(side="left", fill="both", expand=True, padx=(0, 7))
+        tk.Label(language.body, text=tr(self.language, "language"), bg=COLORS["panel"], fg=COLORS["cyan"], font=FONTS["heading"]).pack(anchor="w", pady=(0, 10))
+        buttons = tk.Frame(language.body, bg=COLORS["panel"])
+        buttons.pack(anchor="w")
+        ttk.Button(buttons, text="Русский", style="Accent.TButton" if self.language == "ru" else "Soft.TButton", command=lambda: self.set_language("ru")).pack(side="left", padx=(0, 7))
+        ttk.Button(buttons, text="English", style="Accent.TButton" if self.language == "en" else "Soft.TButton", command=lambda: self.set_language("en")).pack(side="left")
+
+        logging = ShadowCard(row)
+        logging.pack(side="left", fill="both", expand=True, padx=(7, 0))
+        ttk.Checkbutton(logging.body, text=tr(self.language, "technical_logging"), variable=self.tech_var, command=self.toggle_technical).pack(anchor="w")
+        tk.Label(logging.body, text=tr(self.language, "technical_help"), bg=COLORS["panel"], fg=COLORS["muted"], font=FONTS["small"], justify="left", wraplength=440).pack(anchor="w", pady=(8, 0))
+
+        installer = ShadowCard(page)
+        installer.pack(fill="x", pady=14)
+        tk.Label(installer.body, text=tr(self.language, "installer"), bg=COLORS["panel"], fg=COLORS["amber"], font=FONTS["heading"]).pack(anchor="w")
+        tk.Label(installer.body, text=tr(self.language, "install_help"), bg=COLORS["panel"], fg=COLORS["muted"], font=FONTS["body"], justify="left", wraplength=800).pack(side="left", pady=(8, 0))
+        ttk.Button(installer.body, text=tr(self.language, "run_installer"), style="Accent.TButton", command=self.open_installer).pack(side="right", padx=(15, 0))
+
+        exports = ShadowCard(page)
+        exports.pack(fill="x")
+        ttk.Button(exports.body, text=tr(self.language, "export_history"), style="Soft.TButton", command=self.export_history).pack(side="left", padx=(0, 8))
+        ttk.Button(exports.body, text=tr(self.language, "export_bundle"), style="Soft.TButton", command=self.export_bundle).pack(side="left", padx=8)
+        ttk.Button(exports.body, text=tr(self.language, "open_folder"), style="Soft.TButton", command=lambda: os.startfile(BASE_DIR)).pack(side="right")
+
+    def switch_page(self, name: str) -> None:
+        if name not in self.pages:
+            name = "overview"
+        self.current_page = name
+        for page in self.pages.values():
+            page.pack_forget()
+        self.pages[name].pack(fill="both", expand=True)
+        for key, button in self.nav_buttons.items():
+            active = key == name
+            button.configure(bg=COLORS["panel_alt"] if active else COLORS["sidebar"], fg=COLORS["cyan"] if active else COLORS["muted"])
+        self.page_title.configure(text=tr(self.language, name))
+        self.page_subtitle.configure(text=tr(self.language, f"{name}_sub"))
+
+    def set_language(self, language: str) -> None:
+        if language not in {"ru", "en"} or language == self.language:
+            return
+        self._capture_preferences()
+        self.language = language
+        self.preferences["language"] = language
+        laya_preferences.save_preferences(self.preferences, PREFERENCES_PATH)
+        self.last_log_signature = None
+        for child in self.winfo_children():
+            child.destroy()
+        self._build_ui()
+        self.refresh_views()
+
+    def _priority_changed(self, key: str, raw: str) -> None:
+        if key in self.priority_values:
+            self.priority_values[key].configure(text=str(int(float(raw))))
+
+    def save_priorities(self) -> None:
+        self._capture_preferences()
+        laya_preferences.save_preferences(self.preferences, PREFERENCES_PATH)
+        self.footer.configure(text=tr(self.language, "saved"), fg=COLORS["green"])
+
+    def _capture_preferences(self) -> None:
+        self.preferences["priorities"] = {key: int(float(scale.get())) for key, scale in self.priority_scales.items()}
+        self.preferences["personal_note"] = self.personal_note.get("1.0", "end").strip()[:1200]
+        self.preferences["safety"] = {
+            "avoid_unprovoked_attacks": self.avoid_attacks_var.get(),
+            "prefer_peaceful_trade": self.peaceful_trade_var.get(),
+            "protect_food_reserve": self.protect_food_var.get(),
+        }
+        self.preferences["technical_logging"] = self.tech_var.get()
+
+    def reset_priorities(self) -> None:
+        for key, value in laya_preferences.DEFAULT_PRIORITIES.items():
+            self.priority_scales[key].set(value)
+            self.priority_values[key].configure(text=str(value))
+        self.avoid_attacks_var.set(False)
+        self.peaceful_trade_var.set(False)
+        self.protect_food_var.set(True)
+
+    def toggle_technical(self) -> None:
+        self.preferences["technical_logging"] = self.tech_var.get()
+        laya_preferences.save_preferences(self.preferences, PREFERENCES_PATH)
+        if hasattr(self, "details"):
+            self.details.configure(font=FONTS["mono"] if self.tech_var.get() else FONTS["body"])
+            self.show_selected()
+
+    def start_laya(self) -> None:
+        existing = read_pid(self.pid_path)
+        if existing:
+            messagebox.showinfo(APP_NAME, tr(self.language, "laya_online"))
+            return
+        try:
+            pid = start_director(self.config_data, self.log_path, self.state_path, self.pid_path)
+            self.footer.configure(text=f"{tr(self.language, 'laya_online')} · PID {pid}", fg=COLORS["green"])
+        except (OSError, FileNotFoundError) as exc:
+            messagebox.showerror(APP_NAME, f"{tr(self.language, 'error')}: {exc}")
+
+    def stop_laya(self) -> None:
+        try:
+            pid = stop_director(self.pid_path)
+            self.footer.configure(text=tr(self.language, "laya_offline") if pid else tr(self.language, "laya_offline"), fg=COLORS["muted"])
+        except OSError as exc:
+            messagebox.showerror(APP_NAME, f"{tr(self.language, 'error')}: {exc}")
+
+    def set_speed(self, speed: int) -> None:
+        url = f"{str(self.config_data['api_url']).rstrip('/')}/api/v1/game/speed?speed={speed}"
+        try:
+            result = request_json(url, method="POST")
+            if not result.get("success", False):
+                raise RuntimeError("; ".join(result.get("errors") or [tr(self.language, "error")]))
+            self.footer.configure(text=tr(self.language, "pause" if speed == 0 else "resume"), fg=COLORS["cyan"])
+        except Exception as exc:
+            messagebox.showerror(APP_NAME, f"{tr(self.language, 'error')}: {exc}")
+
+    def export_history(self) -> None:
+        target = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV", "*.csv"), ("JSON Lines", "*.jsonl")], initialfile=timestamped_export_name("laya-history", "csv"))
+        if not target:
+            return
+        try:
+            export_history(self.log_path, Path(target))
+            self.footer.configure(text=f"{tr(self.language, 'done')}: {target}", fg=COLORS["green"])
+        except OSError as exc:
+            messagebox.showerror(APP_NAME, str(exc))
+
+    def export_bundle(self) -> None:
+        target = filedialog.asksaveasfilename(defaultextension=".zip", filetypes=[("ZIP", "*.zip")], initialfile=timestamped_export_name("laya-export", "zip"))
+        if not target:
+            return
+        try:
+            export_bundle(Path(target), self.log_path, self.state_path)
+            self.footer.configure(text=f"{tr(self.language, 'done')}: {target}", fg=COLORS["green"])
+        except OSError as exc:
+            messagebox.showerror(APP_NAME, str(exc))
+
+    def open_installer(self) -> None:
+        executable = BASE_DIR / "Laya-Setup.exe"
+        script = BASE_DIR / "laya_setup.py"
+        try:
+            if executable.exists():
+                subprocess.Popen([str(executable)], cwd=BASE_DIR)
+            elif script.exists():
+                subprocess.Popen([sys.executable, str(script)], cwd=BASE_DIR)
+            else:
+                raise FileNotFoundError("Laya-Setup.exe")
+        except OSError as exc:
+            messagebox.showerror(APP_NAME, f"{tr(self.language, 'error')}: {exc}")
+
+    def refresh_all(self) -> None:
+        self.refresh_views()
+        threading.Thread(target=self._probe_game, daemon=True).start()
+        self.after(2000, self.refresh_all)
+
+    def refresh_views(self) -> None:
+        pid = read_pid(self.pid_path)
+        self.laya_chip.configure(text=tr(self.language, "laya_online" if pid else "laya_offline"), fg=status_color(bool(pid)))
+        self.sidebar_status.configure(text=f"● {tr(self.language, 'laya_online' if pid else 'laya_offline')}\n● {tr(self.language, 'game_online' if self.game_online else 'game_offline')}")
+        map_state = self._load_map_state()
+        self._refresh_doctrine(map_state)
+        self._refresh_history()
+
+    def _load_map_state(self) -> dict[str, Any]:
+        try:
+            state = json.loads(self.state_path.read_text(encoding="utf-8-sig"))
+            maps = state.get("maps") or {}
+            return next(reversed(maps.values())) if maps else {}
+        except (OSError, json.JSONDecodeError, StopIteration):
+            return {}
+
+    def _refresh_doctrine(self, map_state: dict[str, Any]) -> None:
+        doctrine = map_state.get("doctrine") or {}
+        audit = map_state.get("doctrine_audit") or {}
+        if doctrine:
+            labels = doctrine_view(doctrine, self.language)
+            course = labels.get("primary_direction", "—")
+            details = " · ".join(filter(None, [
+                labels.get("economy"), labels.get("technology"), labels.get("military"), labels.get("endgame"),
+            ]))
+            strategy_text = "\n".join([
+                f"{tr(self.language, 'current_course')}: {course}",
+                f"{('Экономика' if self.language == 'ru' else 'Economy')}: {labels.get('economy', '—')}",
+                f"{('Технологии' if self.language == 'ru' else 'Technology')}: {labels.get('technology', '—')}",
+                f"{('Оборона' if self.language == 'ru' else 'Defense')}: {labels.get('military', '—')}",
+                f"{('Общество' if self.language == 'ru' else 'Society')}: {labels.get('society', '—')}",
+                f"{('Финальная цель' if self.language == 'ru' else 'Long-term objective')}: {labels.get('endgame', '—')}",
+            ])
+        else:
+            course, details, strategy_text = tr(self.language, "no_doctrine"), "", tr(self.language, "no_doctrine")
+        self.overview_course.configure(text=course)
+        self.overview_course_details.configure(text=details)
+        self.strategy_summary.configure(text=strategy_text)
+
+        coverage = audit.get("coverage") or {}
+        available = list(audit.get("available_directions") or strategy.DIRECTIONS)
+        unavailable = audit.get("unavailable_directions") or {}
+        expansions = [name.title() for name, active in (audit.get("expansions") or {}).items() if active]
+        self.content_summary.configure(text=", ".join(expansions) or "Core")
+        self.content_details.configure(text=f"{coverage.get('available', len(available))}/{coverage.get('total', len(strategy.DIRECTIONS))} · {tr(self.language, 'hidden_directions')}: {len(unavailable)}")
+        lines = []
+        if available:
+            by_domain: dict[str, list[str]] = {}
+            for key in available:
+                spec = strategy.DIRECTIONS.get(key) or {}
+                domain = str(spec.get("domain") or "other")
+                by_domain.setdefault(domain, []).append(humanize(key, self.language))
+            for domain, names in by_domain.items():
+                domain_label = strategy.DOMAIN_LABELS.get(domain, domain) if self.language == "ru" else domain.replace("_", " ").title()
+                lines.append(f"{domain_label}\n  • " + "\n  • ".join(names))
+        else:
+            lines.append(tr(self.language, "no_doctrine"))
+        self.direction_catalog.configure(state="normal")
+        self.direction_catalog.delete("1.0", "end")
+        self.direction_catalog.insert("1.0", "\n\n".join(lines))
+        self.direction_catalog.configure(state="disabled")
+
+    def _probe_game(self) -> None:
+        try:
+            result = request_json(f"{str(self.config_data['api_url']).rstrip('/')}/api/v1/game/state")
+            online = bool(result.get("success"))
+        except (OSError, URLError, ValueError, json.JSONDecodeError):
+            online = False
+        self.game_online = online
+        self.after(0, lambda: self.game_chip.configure(text=tr(self.language, "game_online" if online else "game_offline"), fg=status_color(online)))
+
+    def _refresh_history(self) -> None:
+        try:
+            stat = self.log_path.stat()
+            signature = (stat.st_size, stat.st_mtime_ns)
+        except OSError:
+            signature = None
+        if signature == self.last_log_signature and self.records:
+            return
+        self.last_log_signature = signature
+        self.records = tail_jsonl(self.log_path)
+        selected = self.tree.selection() if hasattr(self, "tree") else ()
+        selected_index = int(selected[0]) if selected else None
+        self.tree.delete(*self.tree.get_children())
+        for index, row in enumerate(self.records):
+            decision = row.get("decision") or {}
+            result = row.get("result") or {}
+            timestamp = str(row.get("timestamp") or "")
+            try:
+                timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).astimezone().strftime("%d.%m %H:%M")
+            except ValueError:
+                pass
+            choice = humanize(decision.get("choice") or row.get("error") or "—", self.language)
+            confidence = decision.get("confidence")
+            confidence_text = f"{float(confidence) * 100:.0f}%" if confidence is not None else "—"
+            result_text = tr(self.language, "done") if result.get("applied") is True else tr(self.language, "error") if row.get("error") else tr(self.language, "not_applied")
+            self.tree.insert("", "end", iid=str(index), values=(timestamp, choice, confidence_text, result_text))
+        if self.records:
+            target = str(selected_index if selected_index is not None and selected_index < len(self.records) else len(self.records) - 1)
+            self.tree.selection_set(target)
+            self.tree.see(target)
+            self.show_selected()
+            latest = self.records[-1]
+            latest_decision = latest.get("decision") or {}
+            self.latest_choice.configure(text=humanize(latest_decision.get("choice") or "—", self.language))
+            confidence = latest_decision.get("confidence")
+            suffix = f"{tr(self.language, 'confidence')}: {float(confidence) * 100:.0f}%" if confidence is not None else ""
+            self.latest_result.configure(text=suffix)
+
+    def show_selected(self, _event=None) -> None:
+        if not hasattr(self, "tree"):
+            return
+        selection = self.tree.selection()
+        if not selection:
+            return
+        index = int(selection[0])
+        if not 0 <= index < len(self.records):
+            return
+        row = self.records[index]
+        self.details.configure(state="normal")
+        self.details.delete("1.0", "end")
+        if self.tech_var.get():
+            self.details.insert("1.0", json.dumps(row, ensure_ascii=False, indent=2, default=str))
+        else:
+            decision = row.get("decision") or {}
+            raw = decision.get("raw") or {}
+            answers = raw.get("answers") or {}
+            choice = humanize(decision.get("choice") or "—", self.language)
+            lines = [tr(self.language, "decision_intro", count=len(row.get("candidates") or []), choice=choice)]
+            confidence = decision.get("confidence")
+            if confidence is not None:
+                lines.append(f"{tr(self.language, 'confidence')}: {float(confidence) * 100:.0f}%")
+            action_answer = answers.get("colony_goal_action") or {}
+            probabilities = action_answer.get("probabilities") or {}
+            ranked = sorted(probabilities.items(), key=lambda item: float(item[1]), reverse=True)
+            if ranked:
+                visible = ranked[:12]
+                lines.extend(["", tr(self.language, "alternatives") + ":"])
+                lines.extend(f"• {humanize(name, self.language)} — {float(probability) * 100:.0f}%" for name, probability in visible)
+                if len(ranked) > len(visible):
+                    lines.append(f"• {tr(self.language, 'more_options', count=len(ranked) - len(visible))}")
+            elif row.get("candidates"):
+                candidates = list(row.get("candidates") or [])
+                lines.extend(["", tr(self.language, "alternatives") + ":"])
+                lines.extend(f"• {humanize(name, self.language)}" for name in candidates[:12])
+                if len(candidates) > 12:
+                    lines.append(f"• {tr(self.language, 'more_options', count=len(candidates) - 12)}")
+            path = []
+            for question_id, answer in answers.items():
+                if not isinstance(answer, dict) or question_id == "colony_goal_action":
+                    continue
+                label = QUESTION_TEXT[self.language].get(str(question_id), humanize(question_id, self.language))
+                path.append(f"• {label}: {humanize(answer.get('choice'), self.language)}")
+            if path:
+                lines.extend(["", tr(self.language, "why") + ":", *path])
+            result = row.get("result") or {}
+            result_text = tr(self.language, "done") if result.get("applied") is True else tr(self.language, "error") if row.get("error") else tr(self.language, "not_applied")
+            lines.extend(["", f"{tr(self.language, 'result')}: {result_text}"])
+            self.details.insert("1.0", "\n".join(lines))
+        self.details.configure(state="disabled")
+
+    def _animate_mascot(self) -> None:
+        self.animation_tick += 1
+        if getattr(self, "mascot_item", None) and self.mascot_canvas.winfo_exists():
+            y = 74 + math.sin(self.animation_tick / 9.0) * 3
+            self.mascot_canvas.coords(self.mascot_item, 113, y)
+        self.after(70, self._animate_mascot)
+
+
+def run() -> None:
+    ControlCenter().mainloop()

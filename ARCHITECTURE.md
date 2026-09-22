@@ -39,6 +39,18 @@ active package IDs + live research/building/work catalogues + workforce fit
 
 `colony_strategy.py` owns the audited Core/DLC catalogue. It filters inactive expansion mechanics before inference and turns the saved doctrine into live research, architecture and fortification candidates. `DIRECTION_AUDIT.md` records the coverage boundary and official sources.
 
+Player guidance is a separate input, not a game command:
+
+```text
+laya_gui priorities/note/safety boundaries
+  -> validated laya-preferences.json
+  -> compact player_preferences model context
+  -> candidate ordering and explanation
+  -> normal feasibility/safety validation still wins
+```
+
+The UI itself is isolated in `laya_gui/`; `laya_control.py` is only a stable launcher. Normal history is deliberately user-facing. Technical mode changes both presentation and persistence: development cycles add full details/snapshots, while combat cycles retain their full snapshot only when that switch is active. See `GUI.md`.
+
 Combat follows its own hierarchy:
 
 ```text

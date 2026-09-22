@@ -40,6 +40,9 @@ The project is unofficial and experimental. It can make bad decisions and lose a
 - Ancient Danger: treat the proximity warning as a sealed strategic site rather than a raid; Laya chooses to leave it, prepare, or designate a normal wall-deconstruction job to open it, then resumes the warning pause.
 - Content-aware doctrine v2: 30 Core/DLC strategic archetypes are composed with settlement, economy, technology, defense, society, diplomacy and all official endgame axes. Inactive DLC choices are hidden; the selected course, available catalogue and every cascade probability appear in the GUI.
 - Observability: an in-game overlay and Windows control center show choices, probabilities, results and exportable history.
+- Friendly control center: dark cartoon dashboard with an animated original mascot, sidebar navigation, soft shadows, Russian/English UI, friendly decision explanations and an optional technical view.
+- Player guidance: eight priority weights, a personal instruction and peaceful/safety boundaries are read by development, combat and event decisions without bypassing feasibility gates.
+- One-click setup assistant: `Laya-Setup.exe` creates the isolated Python environment, installs packages, backs up/replaces the RIMAPI mod and writes local settings.
 
 ## Safety model
 
@@ -57,7 +60,9 @@ Prerequisites:
 4. An NVIDIA GPU is recommended; CPU mode is supported but slower.
 5. At least roughly 1 GB free for model weights and additional space for PyTorch.
 
-Download the `laya-rimworld-director-0.0.2.zip` release, extract it, open PowerShell in the extracted folder and run:
+Download and extract `laya-rimworld-director-0.0.2.zip`, then open `Laya-Setup.exe`. Choose the RimWorld folder and press **Install everything**. The assistant handles Python packages and the bundled RIMAPI mod without a command line.
+
+The PowerShell path remains available for maintainers:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
@@ -116,7 +121,7 @@ Each cycle follows a hierarchical decision pipeline:
 6. For architecture, choose program → house style when relevant → one bounded generated variant; the other programs and layouts are never evaluated.
 7. For combat, choose tactic → exact roster → psycast/caster only when a psychic tactic was selected; RIMAPI then resolves trap-free positions against live defenses.
 8. For events, choose one verified occurrence → response → trader/quest/mission parameters only when that branch needs them.
-7. Validate the selected choice again and translate it into normal game commands.
+9. Validate the selected choice again and translate it into normal game commands.
 
 Emergency survival gates run before long-horizon planning. Combat is checked much more often than ordinary development. Repeated orders are suppressed using a persistent state file and signatures of active combatants/jobs.
 
@@ -136,8 +141,8 @@ colony_director.py
   ↕ typed questions + probabilities
 convaiinnovations/laya (local PyTorch model)
 
-laya_control.py / in-game overlay
-  ↳ status, doctrine, candidate history, export, start/stop
+laya_gui/ via laya_control.py / in-game overlay
+  ↳ status, doctrine, friendly history, personal priorities, export, start/stop
 ```
 
 Important files:
@@ -150,7 +155,10 @@ Important files:
 - `rimworld_laya.py` — local API client and combat decision loop.
 - `colony_combat.py` — tactical catalogue, threat-sensitive filtering and psycast choices.
 - `colony_events.py` — extensible event-family classification and response hierarchy.
-- `laya_control.py` — Windows GUI.
+- `laya_control.py` — stable Windows GUI launcher.
+- `laya_gui/` — themed bilingual interface, friendly history, process/export services and graphical setup assistant.
+- `laya_preferences.py` — validated player priority and safety guidance shared with all decision loops.
+- `GUI.md` — interface architecture and installer contract.
 - `vendor/RIMAPI/` — complete corresponding source and compiled RimWorld 1.6 assembly for the modified GPL-3.0 mod.
 - `tests/` — deterministic unit tests for safety and blueprint logic.
 - `CUSTOM-RIMAPI.md` — added endpoint summary.
@@ -162,7 +170,7 @@ Python:
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m py_compile colony_director.py colony_professions.py colony_architect.py colony_strategy.py rimworld_laya.py laya_control.py
+.\.venv\Scripts\python.exe -m py_compile colony_director.py colony_professions.py colony_architect.py colony_strategy.py laya_preferences.py rimworld_laya.py laya_control.py laya_setup.py
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
@@ -172,14 +180,20 @@ Modified RIMAPI (requires the .NET 8 SDK; targets .NET Framework 4.7.2 through r
 dotnet build vendor\RIMAPI\Source\RIMAPI\RimApi.csproj -c Release-1.6
 ```
 
-The 0.0.2 development branch passes 55 Python tests and compiles the C# mod with zero warnings/errors.
+Reproducible Windows GUI binaries (creates a separate build environment):
+
+```powershell
+.\Build-GUI.ps1
+```
+
+The 0.0.2 development branch passes 60 Python tests, smoke-tests both Tk applications and compiles the C# mod with zero warnings/errors.
 
 ## Data and privacy
 
 - Inference is local.
 - The model is downloaded from Hugging Face on first run.
 - The game API listens locally; do not expose port 8765 to a network.
-- `logs/`, save files, model caches and `laya-control.json` are excluded from Git.
+- `logs/`, save files, model caches, `laya-control.json` and `laya-preferences.json` are excluded from Git.
 - Decision logs may contain pawn names and colony details. Review them before sharing an export.
 
 ## Limitations

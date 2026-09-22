@@ -14,6 +14,7 @@ from urllib.parse import urlencode, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 import colony_combat as combat_planner
+import laya_preferences
 
 
 DEFAULT_API_URL = "http://localhost:8765"
@@ -380,6 +381,7 @@ def decision_state(snapshot: dict[str, Any]) -> dict[str, Any]:
         task = "The API verifies that no hostile pawns remain; decide whether to end combat readiness."
     else:
         task = "Choose one safe colony work-priority action for the next short interval."
+    preferences = laya_preferences.load_preferences()
     return {
         "task": task,
         "game": snapshot["game"],
@@ -399,6 +401,7 @@ def decision_state(snapshot: dict[str, Any]) -> dict[str, Any]:
         },
         "current_jobs": [c["current_job"] for c in colonists[:8]],
         "combat": snapshot["combat"],
+        "player_preferences": laya_preferences.model_context(preferences),
         "constraints": [
             "Do not cheat, spawn items, edit pawn stats, or force combat.",
             "During a threat, use only real drafted colonists and real hostile target IDs.",
@@ -846,7 +849,11 @@ def run_cycle(
         "action": action,
         "result": result,
     }
-    append_log(log_path, record)
+    preferences = laya_preferences.load_preferences()
+    if preferences.get("technical_logging"):
+        append_log(log_path, record)
+    else:
+        append_log(log_path, {key: value for key, value in record.items() if key != "snapshot"})
     return record
 
 

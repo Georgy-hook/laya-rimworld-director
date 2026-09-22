@@ -4,9 +4,11 @@ logs/
 *.rws
 *.failed-*
 laya-control.json
+laya-preferences.json
 
 # Python
 .venv/
+.build-venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -16,6 +18,7 @@ build/
 dist/
 *.spec
 Laya-Control-Center.exe
+Laya-Setup.exe
 vendor/RIMAPI/Source/**/bin/
 vendor/RIMAPI/Source/**/obj/
 vendor/RIMAPI/1.6/Assemblies/*.pdb
