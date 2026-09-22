@@ -936,6 +936,56 @@ def animal_needs_assisted_feeding(animal: dict[str, Any]) -> bool:
     return is_patient and float(animal.get("hunger") or 1.0) < 0.35
 
 
+def action_backoff_remaining(map_state: dict[str, Any], choice: str, now: float | None = None) -> float:
+    """Return the real-time cooldown left for an action that recently failed."""
+    failure = (map_state.get("action_failures") or {}).get(choice) or {}
+    return max(0.0, float(failure.get("retry_after") or 0.0) - (time.time() if now is None else now))
+
+
+def register_action_failure(
+    map_state: dict[str, Any],
+    choice: str,
+    error: Exception | str,
+    now: float | None = None,
+) -> dict[str, Any]:
+    """Persist bounded exponential backoff so one rejected order cannot become a loop."""
+    current_time = time.time() if now is None else now
+    failures = map_state.setdefault("action_failures", {})
+    previous = failures.get(choice) or {}
+    count = min(8, int(previous.get("count") or 0) + 1)
+    cooldown = min(300.0, 30.0 * (2 ** (count - 1)))
+    failure = {
+        "count": count,
+        "error": str(error)[:500],
+        "failed_at": current_time,
+        "retry_after": current_time + cooldown,
+    }
+    failures[choice] = failure
+    return failure
+
+
+def clear_action_failure(map_state: dict[str, Any], choice: str) -> None:
+    failures = map_state.get("action_failures")
+    if isinstance(failures, dict):
+        failures.pop(choice, None)
+
+
+def filter_backed_off_choices(
+    map_state: dict[str, Any],
+    choices: list[str] | dict[str, Any],
+    *,
+    prefix: str = "",
+) -> tuple[list[str], dict[str, float]]:
+    """Remove temporarily failing choices while preserving their remaining delay."""
+    names = list(choices)
+    blocked = {
+        name: action_backoff_remaining(map_state, f"{prefix}{name}")
+        for name in names
+        if action_backoff_remaining(map_state, f"{prefix}{name}") > 0.0
+    }
+    return [name for name in names if name not in blocked], blocked
+
+
 def available_sale_categories(snapshot: dict[str, Any]) -> list[str]:
     found: set[str] = set()
     for row in snapshot.get("development", {}).get("things", []):
@@ -3500,6 +3550,13 @@ def run_development_cycle(client: bridge.RimApiClient, agent: Any, state: dict[s
         )
     candidates, details = candidate_actions(client, snapshot, map_state)
     candidates = laya_preferences.filter_candidates(candidates, player_preferences)
+    candidates, blocked_actions = filter_backed_off_choices(map_state, candidates)
+    if not candidates:
+        candidates = ["hold_survival"]
+    if blocked_actions:
+        snapshot["development"]["temporarily_blocked_actions"] = {
+            choice: round(remaining, 1) for choice, remaining in blocked_actions.items()
+        }
     decision = choose_action(agent, snapshot, candidates)
     for key in (
         "trade_purchase", "stone_type", "tame_target", "wild_plant_type", "hunt_target",
@@ -3515,7 +3572,20 @@ def run_development_cycle(client: bridge.RimApiClient, agent: Any, state: dict[s
     ):
         if decision.get(key) is not None:
             details[key] = decision[key]
-    result = execute_action(client, snapshot, map_state, decision["choice"], details)
+    choice = str(decision["choice"])
+    try:
+        result = execute_action(client, snapshot, map_state, choice, details)
+    except bridge.RimApiError as exc:
+        failure = register_action_failure(map_state, choice, exc)
+        result = {
+            "applied": False,
+            "skipped": "api_error_backoff",
+            "error": str(exc),
+            "failure_count": failure["count"],
+            "retry_in_seconds": round(float(failure["retry_after"]) - time.time(), 1),
+        }
+    else:
+        clear_action_failure(map_state, choice)
     try:
         publish_overlay(client, snapshot, candidates, decision)
     except bridge.RimApiError as exc:
@@ -3693,6 +3763,13 @@ def run_event_cycle(
         return None
     event = pending[0]
     options = events.response_options(event, context)
+    failure_prefix = f"event:{event['signature']}:"
+    available_responses, blocked_responses = filter_backed_off_choices(
+        map_state, options, prefix=failure_prefix
+    )
+    if not available_responses:
+        return None
+    options = {name: options[name] for name in available_responses}
     event_model_context = events.event_context_for_model(event, context, snapshot)
     event_model_context["player_preferences"] = laya_preferences.model_context(laya_preferences.load_preferences())
     raw = agent.predict(event_model_context, {
@@ -3735,10 +3812,24 @@ def run_event_cycle(
             details["sale_category"] = str(policy_raw.get("answers", {}).get("sale_category", {}).get("choice") or "none")
             details["purchase_priority"] = str(policy_raw.get("answers", {}).get("purchase_priority", {}).get("choice") or "none")
             raw["trade"] = {"trader": trader_raw, "policy": policy_raw}
-    result = _execute_event_response(client, snapshot, map_state, event, context, response, details)
+    execution_failed = False
+    try:
+        result = _execute_event_response(client, snapshot, map_state, event, context, response, details)
+    except bridge.RimApiError as exc:
+        execution_failed = True
+        failure = register_action_failure(map_state, f"{failure_prefix}{response}", exc)
+        result = {
+            "applied": False,
+            "skipped": "event_api_error_backoff",
+            "error": str(exc),
+            "failure_count": failure["count"],
+            "retry_in_seconds": round(float(failure["retry_after"]) - time.time(), 1),
+        }
+    else:
+        clear_action_failure(map_state, f"{failure_prefix}{response}")
     # Quest acceptance is phase one; a fresh snapshot must be allowed to offer
     # the newly created/updated rescue site on the next cycle.
-    if response != "accept_rescue_quest":
+    if not execution_failed and response != "accept_rescue_quest":
         history[event["signature"]] = tick
     try:
         publish_event_overlay(client, event, options, answer, result)
@@ -3746,7 +3837,8 @@ def run_event_cycle(
         snapshot.setdefault("warnings", []).append(str(exc))
     record = {
         "timestamp": bridge.utc_now(), "mode": "event-director", "map_seed": seed,
-        "event": event, "options": options, "decision": {"choice": response, "raw": raw, **details}, "result": result,
+        "event": event, "options": options, "blocked_options": blocked_responses,
+        "decision": {"choice": response, "raw": raw, **details}, "result": result,
     }
     save_state(state_path, state)
     bridge.append_log(log_path, record)
@@ -4124,6 +4216,15 @@ def classify_runtime_problem(detail: str) -> tuple[str, str, str]:
     return "error", detail, "Decision cycle problem"
 
 
+def cycle_retry_policy(runtime_state: str, consecutive_errors: int, interval: float) -> tuple[float, int]:
+    """Return retry delay and next error count without busy-looping the API."""
+    if runtime_state == "waiting":
+        return min(10.0, max(2.0, interval)), 0
+    next_count = min(8, consecutive_errors + 1)
+    delay = min(300.0, max(10.0, interval) * (2 ** (next_count - 1)))
+    return delay, next_count
+
+
 def main() -> int:
     args = parser().parse_args()
     singleton_handle = None
@@ -4147,6 +4248,8 @@ def main() -> int:
     last_combat_record: dict[str, Any] | None = None
     next_colony_cycle = 0.0
     next_downed_cycle = 0.0
+    retry_not_before = 0.0
+    consecutive_cycle_errors = 0
     runtime_state = "running"
     runtime_detail = "Ready for the next decision cycle"
     print("Laya colony director active: survival -> doctrine -> chosen endgame. Ctrl+C stops safely.", flush=True)
@@ -4159,6 +4262,11 @@ def main() -> int:
             write_runtime_status(args.runtime_status, runtime_state, runtime_detail)
             try:
                 snapshot = bridge.collect_snapshot(client)
+                remaining_retry = retry_not_before - time.monotonic()
+                if remaining_retry > 0.0:
+                    elapsed = time.monotonic() - started
+                    time.sleep(max(0.0, min(2.0, remaining_retry) - elapsed))
+                    continue
                 if snapshot["map"]["enemies"] > 0 or any(c.get("is_drafted") for c in snapshot["combat"]["colonists"]):
                     next_colony_cycle = 0.0
                     living_hostiles = [h for h in snapshot["combat"]["hostiles"] if not h.get("is_dead")]
@@ -4245,19 +4353,31 @@ def main() -> int:
                         print(f"[{record['timestamp']}] colony: {record['decision']['choice']} | {record['result']}", flush=True)
                 runtime_state = "running"
                 runtime_detail = "Last decision cycle completed"
+                consecutive_cycle_errors = 0
+                retry_not_before = 0.0
                 write_runtime_status(args.runtime_status, runtime_state, runtime_detail)
             except (bridge.RimApiError, OSError, ValueError, RuntimeError) as exc:
                 now = time.monotonic()
                 detail = str(exc)
                 runtime_state, runtime_detail, prefix = classify_runtime_problem(detail)
+                retry_delay, consecutive_cycle_errors = cycle_retry_policy(
+                    runtime_state, consecutive_cycle_errors, args.interval
+                )
+                if runtime_state != "waiting":
+                    runtime_detail = f"{runtime_detail} Retrying in {retry_delay:.0f}s."
+                retry_not_before = time.monotonic() + retry_delay
                 write_runtime_status(args.runtime_status, runtime_state, runtime_detail)
                 if now - last_wait_message >= 60:
                     print(f"[{bridge.utc_now()}] {prefix}: {exc}", flush=True)
                     last_wait_message = now
                 bridge.append_log(args.log, {"timestamp": bridge.utc_now(), "mode": runtime_state, "error": repr(exc)})
             except Exception as exc:
+                retry_delay, consecutive_cycle_errors = cycle_retry_policy(
+                    "error", consecutive_cycle_errors, args.interval
+                )
+                retry_not_before = time.monotonic() + retry_delay
                 runtime_state = "error"
-                runtime_detail = f"Unexpected cycle error: {exc}"
+                runtime_detail = f"Unexpected cycle error: {exc}. Retrying in {retry_delay:.0f}s."
                 write_runtime_status(args.runtime_status, runtime_state, runtime_detail)
                 traceback.print_exc()
                 bridge.append_log(args.log, {"timestamp": bridge.utc_now(), "mode": "error", "error": repr(exc)})

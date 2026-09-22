@@ -118,6 +118,43 @@ class DirectorTests(unittest.TestCase):
             "current_job": "LayDown",
         }))
 
+    def test_failed_action_uses_bounded_exponential_backoff(self):
+        state = {}
+        first = director.register_action_failure(state, "build_freezer", "missing component", now=100.0)
+        self.assertEqual(first["count"], 1)
+        self.assertEqual(director.action_backoff_remaining(state, "build_freezer", now=100.0), 30.0)
+        second = director.register_action_failure(state, "build_freezer", "still missing", now=131.0)
+        self.assertEqual(second["count"], 2)
+        self.assertEqual(director.action_backoff_remaining(state, "build_freezer", now=131.0), 60.0)
+        for index in range(8):
+            final = director.register_action_failure(state, "build_freezer", f"failure {index}", now=200.0 + index)
+        self.assertEqual(float(final["retry_after"]) - 207.0, 300.0)
+
+    def test_success_clears_action_backoff(self):
+        state = {}
+        director.register_action_failure(state, "build_freezer", "temporary", now=100.0)
+        director.clear_action_failure(state, "build_freezer")
+        self.assertEqual(director.action_backoff_remaining(state, "build_freezer", now=100.0), 0.0)
+
+    def test_backed_off_event_option_is_removed_without_hiding_alternatives(self):
+        state = {}
+        director.register_action_failure(state, "event:heat:pause_sowing", "rejected")
+        available, blocked = director.filter_backed_off_choices(
+            state,
+            {"pause_sowing": "Pause", "emergency_harvest": "Harvest"},
+            prefix="event:heat:",
+        )
+        self.assertEqual(available, ["emergency_harvest"])
+        self.assertIn("pause_sowing", blocked)
+
+    def test_cycle_errors_back_off_but_missing_game_stays_responsive(self):
+        delay, count = director.cycle_retry_policy("error", 0, 10.0)
+        self.assertEqual((delay, count), (10.0, 1))
+        delay, count = director.cycle_retry_policy("error", 5, 10.0)
+        self.assertEqual((delay, count), (300.0, 6))
+        delay, count = director.cycle_retry_policy("waiting", 5, 10.0)
+        self.assertEqual((delay, count), (10.0, 0))
+
     def test_decodes_rle_terrain(self):
         width, height, cells = director.decode_terrain({
             "width": 3,
