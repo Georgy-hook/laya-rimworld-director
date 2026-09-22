@@ -7,31 +7,32 @@ from typing import Callable
 
 
 COLORS = {
-    "window": "#0B0D14",
-    "sidebar": "#11141E",
-    "panel": "#171B28",
-    "panel_alt": "#1E2333",
-    "shadow": "#05070B",
-    "line": "#2A3044",
-    "text": "#F4F6FF",
-    "muted": "#9AA4BD",
-    "cyan": "#5DE4FF",
-    "violet": "#A78BFA",
-    "amber": "#FFCB6B",
-    "green": "#66E3A4",
-    "red": "#FF7185",
-    "navy": "#0F1730",
-    "hover": "#303B59",
+    "window": "#090B12",
+    "sidebar": "#0F121C",
+    "panel": "#161A27",
+    "panel_alt": "#202638",
+    "shadow": "#03050A",
+    "line": "#30374D",
+    "text": "#F5F7FF",
+    "muted": "#A8B1C7",
+    "cyan": "#63E6FF",
+    "violet": "#AA92FF",
+    "amber": "#FFD078",
+    "green": "#70E5AC",
+    "red": "#FF7D91",
+    "navy": "#0D1731",
+    "hover": "#343D5A",
+    "focus": "#8DEBFF",
 }
 
 FONTS = {
-    "display": ("Segoe UI Semibold", 24),
-    "title": ("Segoe UI Semibold", 16),
-    "heading": ("Segoe UI Semibold", 12),
-    "body": ("Segoe UI", 10),
-    "small": ("Segoe UI", 9),
+    "display": ("Segoe UI Variable Display Semib", 25),
+    "title": ("Segoe UI Variable Display Semib", 16),
+    "heading": ("Segoe UI Variable Text Semibold", 12),
+    "body": ("Segoe UI Variable Text", 10),
+    "small": ("Segoe UI Variable Text", 9),
     "mono": ("Cascadia Mono", 9),
-    "button": ("Segoe UI Semibold", 10),
+    "button": ("Segoe UI Variable Text Semibold", 10),
 }
 
 
@@ -47,7 +48,7 @@ def configure_styles(root: tk.Misc) -> ttk.Style:
     style.configure("Muted.Panel.TLabel", background=COLORS["panel"], foreground=COLORS["muted"])
     style.configure("Title.TLabel", font=FONTS["display"], foreground=COLORS["text"])
     style.configure("Heading.Panel.TLabel", background=COLORS["panel"], foreground=COLORS["text"], font=FONTS["heading"])
-    style.configure("Accent.TButton", padding=(16, 10), background=COLORS["violet"], foreground="#10121A", font=("Segoe UI Semibold", 10), borderwidth=0)
+    style.configure("Accent.TButton", padding=(16, 10), background=COLORS["violet"], foreground="#10121A", font=FONTS["button"], borderwidth=0)
     style.map("Accent.TButton", background=[("active", COLORS["cyan"]), ("disabled", COLORS["line"])])
     style.configure("Soft.TButton", padding=(14, 9), background=COLORS["panel_alt"], foreground=COLORS["text"], borderwidth=0)
     style.map("Soft.TButton", background=[("active", "#30374D")])
@@ -56,7 +57,7 @@ def configure_styles(root: tk.Misc) -> ttk.Style:
     style.configure("TCheckbutton", background=COLORS["panel"], foreground=COLORS["text"])
     style.map("TCheckbutton", background=[("active", COLORS["panel"])])
     style.configure("Treeview", background=COLORS["panel"], fieldbackground=COLORS["panel"], foreground=COLORS["text"], rowheight=32, borderwidth=0)
-    style.configure("Treeview.Heading", background=COLORS["panel_alt"], foreground=COLORS["muted"], font=("Segoe UI Semibold", 9), relief="flat")
+    style.configure("Treeview.Heading", background=COLORS["panel_alt"], foreground=COLORS["muted"], font=("Segoe UI Variable Text Semibold", 9), relief="flat")
     style.map("Treeview", background=[("selected", "#39335E")], foreground=[("selected", COLORS["text"])])
     style.configure("Horizontal.TScale", background=COLORS["panel"], troughcolor=COLORS["line"], sliderthickness=16)
     style.configure("TCombobox", fieldbackground=COLORS["panel_alt"], background=COLORS["panel_alt"], foreground=COLORS["text"])
@@ -129,6 +130,7 @@ class FancyButton(tk.Canvas):
         self._variant = variant if variant in self.PALETTES else "soft"
         self._state = "normal"
         self._hover = 0.0
+        self._focused = False
         self._animation: str | None = None
         self._font = FONTS["button"]
         measured = tkfont.Font(font=self._font).measure(f"{icon}  {text}" if icon else text) + (76 if image else 34)
@@ -140,12 +142,18 @@ class FancyButton(tk.Canvas):
             bd=0,
             highlightthickness=0,
             cursor="hand2",
+            takefocus=1,
         )
         self._ready = True
         self.bind("<Configure>", lambda _event: self._draw())
         self.bind("<Enter>", lambda _event: self._animate_to(1.0))
         self.bind("<Leave>", lambda _event: self._animate_to(0.0))
+        self.bind("<ButtonPress-1>", lambda _event: self.focus_set())
         self.bind("<ButtonRelease-1>", self._activate)
+        self.bind("<FocusIn>", self._set_focus)
+        self.bind("<FocusOut>", self._set_focus)
+        self.bind("<Return>", self._activate)
+        self.bind("<space>", self._activate)
         self._draw()
 
     def _draw(self) -> None:
@@ -157,7 +165,12 @@ class FancyButton(tk.Canvas):
             base, hover, foreground = COLORS["line"], COLORS["line"], COLORS["muted"]
         fill = _mix_color(self, base, hover, self._hover)
         self.delete("all")
-        _rounded_rectangle(self, 1, 2, width - 2, height - 2, min(15, height // 2), fill=fill, outline="")
+        outline = COLORS["focus"] if self._focused else ""
+        outline_width = 2 if self._focused else 0
+        _rounded_rectangle(
+            self, 2, 2, width - 3, height - 3, min(15, height // 2),
+            fill=fill, outline=outline, width=outline_width,
+        )
         label = f"{self._icon}  {self._text}" if self._icon else self._text
         if self._align == "left":
             if self._image:
@@ -192,6 +205,11 @@ class FancyButton(tk.Canvas):
     def _activate(self, _event=None) -> None:
         if self._state != "disabled" and self._command:
             self._command()
+        return "break"
+
+    def _set_focus(self, event: tk.Event) -> None:
+        self._focused = event.type == tk.EventType.FocusIn
+        self._draw()
 
     def configure(self, cnf=None, **kwargs):
         if not getattr(self, "_ready", False):
@@ -200,7 +218,7 @@ class FancyButton(tk.Canvas):
             self._text = str(kwargs.pop("text"))
         if "state" in kwargs:
             self._state = str(kwargs.pop("state"))
-            self.configure(cursor="" if self._state == "disabled" else "hand2")
+            super().configure(cursor="" if self._state == "disabled" else "hand2", takefocus=0 if self._state == "disabled" else 1)
         if "variant" in kwargs:
             variant = str(kwargs.pop("variant"))
             if variant in self.PALETTES:
@@ -210,6 +228,115 @@ class FancyButton(tk.Canvas):
         return result
 
     config = configure
+
+
+class ModernScrollbar(tk.Canvas):
+    """A compact rounded scrollbar without legacy arrow buttons."""
+
+    def __init__(self, master: tk.Misc, *, command: Callable[..., object], width: int = 12) -> None:
+        super().__init__(
+            master,
+            width=width,
+            bg=_widget_background(master),
+            bd=0,
+            highlightthickness=0,
+            takefocus=1,
+            cursor="hand2",
+        )
+        self._command = command
+        self._first = 0.0
+        self._last = 1.0
+        self._drag_offset: float | None = None
+        self.bind("<Configure>", lambda _event: self._draw())
+        self.bind("<Button-1>", self._press)
+        self.bind("<B1-Motion>", self._drag)
+        self.bind("<ButtonRelease-1>", lambda _event: setattr(self, "_drag_offset", None))
+        self.bind("<Up>", lambda _event: self._scroll(-1, "units"))
+        self.bind("<Down>", lambda _event: self._scroll(1, "units"))
+        self.bind("<Prior>", lambda _event: self._scroll(-1, "pages"))
+        self.bind("<Next>", lambda _event: self._scroll(1, "pages"))
+        self.bind("<Home>", lambda _event: self._move_to(0.0))
+        self.bind("<End>", lambda _event: self._move_to(1.0))
+
+    def set(self, first: str | float, last: str | float) -> None:
+        self._first = max(0.0, min(1.0, float(first)))
+        self._last = max(self._first, min(1.0, float(last)))
+        self._draw()
+
+    def _geometry(self) -> tuple[float, float, float, float]:
+        height = max(1.0, float(self.winfo_height()))
+        top, bottom = 4.0, height - 4.0
+        track = max(1.0, bottom - top)
+        thumb_top = top + track * self._first
+        thumb_bottom = top + track * self._last
+        if thumb_bottom - thumb_top < 30:
+            center = (thumb_top + thumb_bottom) / 2
+            thumb_top = max(top, center - 15)
+            thumb_bottom = min(bottom, thumb_top + 30)
+            thumb_top = max(top, thumb_bottom - 30)
+        return top, bottom, thumb_top, thumb_bottom
+
+    def _draw(self) -> None:
+        width = max(1, self.winfo_width())
+        top, bottom, thumb_top, thumb_bottom = self._geometry()
+        self.delete("all")
+        _rounded_rectangle(self, 3, top, width - 3, bottom, 4, fill=COLORS["panel_alt"], outline="")
+        if self._last - self._first < 0.999:
+            _rounded_rectangle(self, 2, thumb_top, width - 2, thumb_bottom, 5, fill=COLORS["violet"], outline="")
+
+    def _press(self, event: tk.Event) -> None:
+        self.focus_set()
+        top, bottom, thumb_top, thumb_bottom = self._geometry()
+        if thumb_top <= event.y <= thumb_bottom:
+            self._drag_offset = event.y - thumb_top
+            return
+        viewport = max(0.0, self._last - self._first)
+        fraction = (event.y - top) / max(1.0, bottom - top) - viewport / 2
+        self._move_to(fraction)
+
+    def _drag(self, event: tk.Event) -> None:
+        if self._drag_offset is None:
+            return
+        top, bottom, _thumb_top, _thumb_bottom = self._geometry()
+        viewport = max(0.0, self._last - self._first)
+        fraction = (event.y - self._drag_offset - top) / max(1.0, bottom - top)
+        self._move_to(min(1.0 - viewport, max(0.0, fraction)))
+
+    def _move_to(self, fraction: float) -> str:
+        self._command("moveto", max(0.0, min(1.0, fraction)))
+        return "break"
+
+    def _scroll(self, amount: int, what: str) -> str:
+        self._command("scroll", amount, what)
+        return "break"
+
+
+class ScrollablePage(tk.Frame):
+    """A vertically scrollable page that preserves a stable content width."""
+
+    def __init__(self, master: tk.Misc) -> None:
+        super().__init__(master, bg=COLORS["window"])
+        self.canvas = tk.Canvas(self, bg=COLORS["window"], highlightthickness=0, bd=0)
+        self.scrollbar = ModernScrollbar(self, command=self.canvas.yview)
+        self.scrollbar.pack(side="right", fill="y", padx=(8, 0))
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.body = tk.Frame(self.canvas, bg=COLORS["window"])
+        self._window = self.canvas.create_window(0, 0, anchor="nw", window=self.body)
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.body.bind("<Configure>", self._sync_region)
+        self.canvas.bind("<Configure>", self._sync_width)
+        self.canvas.bind("<MouseWheel>", self._mousewheel)
+        self.body.bind("<MouseWheel>", self._mousewheel)
+
+    def _sync_region(self, _event=None) -> None:
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _sync_width(self, event: tk.Event) -> None:
+        self.canvas.itemconfigure(self._window, width=max(1, event.width))
+
+    def _mousewheel(self, event: tk.Event) -> str:
+        self.canvas.yview_scroll(int(-event.delta / 120), "units")
+        return "break"
 
 
 def _widget_background(widget: tk.Misc) -> str:

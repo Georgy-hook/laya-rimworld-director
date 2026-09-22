@@ -40,9 +40,9 @@ The project is unofficial and experimental. It can make bad decisions and lose a
 - Ancient Danger: treat the proximity warning as a sealed strategic site rather than a raid; Laya chooses to leave it, prepare, or designate a normal wall-deconstruction job to open it, then resumes the warning pause.
 - Content-aware doctrine v2: 30 Core/DLC strategic archetypes are composed with settlement, economy, technology, defense, society, diplomacy and all official endgame axes. Inactive DLC choices are hidden; the selected course, available catalogue and every cascade probability appear in the GUI.
 - Observability: an in-game overlay and Windows control center show choices, probabilities, results and exportable history.
-- Friendly control center: dark fancy-cartoon dashboard with rounded cards, animated buttons and orbit effects, a panoramic colony scene, a coordinated original icon set, Russian/English UI, friendly decision explanations and an optional technical view.
+- Friendly control center: dark fancy-cartoon dashboard with rounded cards, animated buttons and orbit effects, a panoramic colony scene, a coordinated original icon set, responsive scrollable pages, modern scrollbars, real flag artwork, Russian/English UI, friendly decision explanations and an optional technical view.
 - Player guidance: eight priority weights, a personal instruction and peaceful/safety boundaries are read by development, combat and event decisions without bypassing feasibility gates.
-- One-click setup assistant: `RimWorld-Autopilot-Setup.exe` installs to a chosen folder (by default `C:\Program Files\RimWorld Autopilot`), optionally adds a desktop shortcut, creates the isolated Python environment, installs packages, backs up/replaces the RIMAPI mod and writes local settings.
+- Standard Windows installer: `RimWorld-Autopilot-0.0.2-Setup.exe` installs to Program Files, offers a desktop shortcut, registers a Windows uninstaller, then opens the friendly one-time assistant for Python, local-model and RIMAPI configuration. The temporary assistant is removed when setup finishes.
 
 ## Safety model
 
@@ -60,7 +60,9 @@ Prerequisites:
 4. An NVIDIA GPU is recommended; CPU mode is supported but slower.
 5. At least roughly 1 GB free for model weights and additional space for PyTorch.
 
-Download and extract `rimworld-autopilot-0.0.2.zip`, then open `RimWorld-Autopilot-Setup.exe`. Choose the application and RimWorld folders, keep the desktop-shortcut option if desired, and press **Install Autopilot**. The assistant handles Python packages and the bundled RIMAPI mod without a command line.
+Download **[RimWorld-Autopilot-0.0.2-Setup.exe](https://github.com/Georgy-hook/rimworld-autopilot/releases/download/v0.0.2/RimWorld-Autopilot-0.0.2-Setup.exe)** from the 0.0.2 release and open it. Choose whether to add a desktop shortcut. On the final page, leave **Configure Python, the local model and the RimWorld mod now** selected; the friendly assistant then verifies Python and RimWorld, creates the local environment and installs the bundled RIMAPI build without a command line.
+
+Windows may show an Unknown Publisher warning because 0.0.2 is an unsigned open-source preview. Verify that the file came from this repository's GitHub release before running it. The ZIP asset is retained for maintainers and portable inspection; normal players should use the Setup EXE.
 
 The PowerShell path remains available for maintainers:
 
@@ -81,7 +83,7 @@ For CPU inference:
 .\Install.ps1 -Device cpu
 ```
 
-The installer copies the application and its local artwork, creates `.venv`, installs `laya==0.3.4`, backs up an existing local `Mods\RIMAPI` folder, installs the modified build, and creates a machine-local `rimworld-autopilot.json`. Writable preferences and logs live under `%LOCALAPPDATA%\RimWorld Autopilot`, not Program Files.
+The installer copies the application and local artwork, registers **RimWorld Autopilot 0.0.2** in Windows Installed apps, and creates only the selected shortcuts. Its temporary configuration assistant creates `.venv`, installs `laya==0.3.4`, backs up an existing local `Mods\RIMAPI` folder, installs the modified build, and writes `rimworld-autopilot.json`. Writable preferences and logs live under `%LOCALAPPDATA%\RimWorld Autopilot`, not Program Files.
 
 Then:
 
@@ -92,6 +94,12 @@ Then:
 5. The first start downloads `convaiinnovations/laya` from Hugging Face.
 
 Stop the console director with `Ctrl+C`, or click **Остановить** in the GUI.
+
+### Uninstall
+
+Use **Settings → Apps → Installed apps → RimWorld Autopilot → Uninstall**, the Start-menu uninstall shortcut, or **Settings → App management → Uninstall Autopilot** inside the control center. The original Setup file is not kept in Program Files; Windows keeps only its standard `unins000.exe` uninstaller.
+
+Uninstall removes the application and shortcuts. It intentionally preserves `%LOCALAPPDATA%\RimWorld Autopilot` and the installed `Mods\RIMAPI` folder so logs, preferences and a potentially shared mod are not destroyed unexpectedly. They can be removed manually after reviewing them.
 
 ## Manual commands
 
@@ -186,7 +194,7 @@ Reproducible Windows GUI binaries (creates a separate build environment):
 .\Build-GUI.ps1
 ```
 
-The same command also assembles `dist/rimworld-autopilot-0.0.2.zip`, containing both EXEs and every adjacent file required by the graphical installer.
+The same command assembles `dist/rimworld-autopilot-0.0.2.zip` and compiles `dist/RimWorld-Autopilot-0.0.2-Setup.exe` with Inno Setup 6.7+. The installer embeds the complete payload, a temporary post-install configuration assistant, the custom portrait artwork and standard Windows uninstall metadata.
 
 The 0.0.2 development branch passes 61 Python tests, smoke-tests both Tk applications and compiles the C# mod with zero warnings/errors.
 

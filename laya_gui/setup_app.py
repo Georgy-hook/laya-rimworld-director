@@ -38,6 +38,14 @@ def _source_root() -> Path:
     return BASE_DIR
 
 
+def _argument_path(name: str, fallback: Path) -> Path:
+    try:
+        index = sys.argv.index(name)
+        return Path(sys.argv[index + 1]).expanduser().resolve()
+    except (ValueError, IndexError, OSError):
+        return fallback
+
+
 DEFAULT_RIMWORLD = _default_rimworld()
 
 SETUP_TEXT = {
@@ -86,11 +94,12 @@ class SetupWindow(tk.Tk):
         self.resizable(False, False)
         self.configure(bg=COLORS["window"])
         configure_styles(self)
-        self.install_var = tk.StringVar(value=str(DEFAULT_INSTALL_DIR))
-        self.rimworld_var = tk.StringVar(value=str(DEFAULT_RIMWORLD))
+        self.install_var = tk.StringVar(value=str(_argument_path("--installed-dir", DEFAULT_INSTALL_DIR)))
+        self.rimworld_var = tk.StringVar(value=str(_argument_path("--rimworld-dir", DEFAULT_RIMWORLD)))
         self.shortcut_var = tk.BooleanVar(value=True)
         self.device_code = "auto"
         self.device_var = tk.StringVar(value="")
+        self.ui_images: dict[str, tk.PhotoImage] = {}
         self._build()
         self.after(100, self._poll_events)
 
@@ -107,13 +116,11 @@ class SetupWindow(tk.Tk):
         art_panel.pack(side="left", fill="y", padx=(0, 12))
         art_canvas = tk.Canvas(art_panel.body, width=330, height=628, bg=COLORS["navy"], highlightthickness=0)
         art_canvas.pack()
-        try:
-            original = tk.PhotoImage(file=str(RESOURCE_DIR / "assets" / "gui" / "autopilot-setup-kit.png"))
-            self.setup_art = original.subsample(4, 4)
+        self.setup_art = self._load_image("setup-art", "autopilot-setup-kit.png", 4)
+        if self.setup_art:
             art_canvas.create_image(165, 285, image=self.setup_art)
-        except tk.TclError:
-            self.setup_art = None
-            art_canvas.create_text(165, 270, text="✦", fill=COLORS["cyan"], font=("Segoe UI Symbol", 70))
+        else:
+            art_canvas.create_text(165, 270, text="AUTOPILOT", fill=COLORS["cyan"], font=FONTS["title"])
         art_canvas.create_text(30, 34, text="RIMWORLD", fill=COLORS["text"], font=("Segoe UI Black", 18), anchor="nw")
         art_canvas.create_text(30, 66, text="AUTOPILOT", fill=COLORS["cyan"], font=("Segoe UI Semibold", 12), anchor="nw")
         art_canvas.create_text(30, 525, text=self.t("art_caption"), fill=COLORS["text"], font=("Segoe UI Semibold", 18), anchor="nw")
@@ -123,8 +130,10 @@ class SetupWindow(tk.Tk):
         right.pack(side="left", fill="both", expand=True, padx=(12, 0))
         language = tk.Frame(right, bg=COLORS["window"])
         language.pack(fill="x")
-        FancyButton(language, text="🇷🇺 RU", width=82, height=34, variant="accent" if self.language == "ru" else "soft", command=lambda: self._set_language("ru")).pack(side="right", padx=(6, 0))
-        FancyButton(language, text="🇬🇧 EN", width=82, height=34, variant="accent" if self.language == "en" else "soft", command=lambda: self._set_language("en")).pack(side="right")
+        ru_flag = self._load_image("flag-ru", "flag-ru.png", 3)
+        en_flag = self._load_image("flag-en", "flag-gb.png", 3)
+        FancyButton(language, text="RU", image=ru_flag, width=84, height=36, variant="accent" if self.language == "ru" else "soft", command=lambda: self._set_language("ru")).pack(side="right", padx=(6, 0))
+        FancyButton(language, text="EN", image=en_flag, width=84, height=36, variant="accent" if self.language == "en" else "soft", command=lambda: self._set_language("en")).pack(side="right")
         tk.Label(right, text=self.t("title"), bg=COLORS["window"], fg=COLORS["text"], font=FONTS["display"]).pack(anchor="w", pady=(14, 0))
         tk.Label(right, text=self.t("subtitle"), bg=COLORS["window"], fg=COLORS["muted"], font=FONTS["body"]).pack(anchor="w", pady=(4, 14))
 
@@ -144,8 +153,19 @@ class SetupWindow(tk.Tk):
         self.progress.pack(fill="x", pady=(4, 7))
         self.status = tk.Label(card.body, text=self.t("ready"), bg=COLORS["panel"], fg=COLORS["muted"], font=FONTS["small"], anchor="w")
         self.status.pack(fill="x")
-        self.install_button = FancyButton(card.body, text=self.t("install"), width=220, height=46, variant="accent", icon="✦", command=self._begin)
+        self.install_button = FancyButton(card.body, text=self.t("install"), width=220, height=46, variant="accent", command=self._begin)
         self.install_button.pack(side="bottom", anchor="e", pady=(14, 0))
+
+    def _load_image(self, key: str, filename: str, subsample: int = 1) -> tk.PhotoImage | None:
+        if key in self.ui_images:
+            return self.ui_images[key]
+        try:
+            original = tk.PhotoImage(file=str(RESOURCE_DIR / "assets" / "gui" / filename))
+            image = original.subsample(subsample, subsample) if subsample > 1 else original
+            self.ui_images[key] = image
+            return image
+        except (OSError, tk.TclError):
+            return None
 
     def _folder_field(self, parent: tk.Misc, label: str, variable: tk.StringVar, command) -> None:
         tk.Label(parent, text=self.t(label), bg=COLORS["panel"], fg=COLORS["text"], font=FONTS["heading"]).pack(anchor="w")
@@ -230,12 +250,15 @@ class SetupWindow(tk.Tk):
             item = source / folder
             if item.exists():
                 shutil.copytree(item, destination / folder, dirs_exist_ok=True)
-        for name in ("RimWorld-Autopilot.exe", "RimWorld-Autopilot-Setup.exe"):
+        for name in ("RimWorld-Autopilot.exe",):
             candidate = source / "dist" / name
             if not candidate.exists():
                 candidate = source / name
             if candidate.exists():
                 shutil.copy2(candidate, destination / name)
+        legacy_setup = destination / "RimWorld-Autopilot-Setup.exe"
+        if legacy_setup.exists():
+            legacy_setup.unlink()
 
     @staticmethod
     def _create_shortcut(install_dir: Path, venv_python: Path) -> None:
@@ -253,7 +276,8 @@ class SetupWindow(tk.Tk):
 
     def _install(self, python: Path, rimworld: Path, install_dir: Path, device: str, shortcut: bool) -> None:
         try:
-            source_root = _source_root().resolve()
+            installed_payload = (install_dir / "requirements.txt").exists() and (install_dir / "vendor" / "RIMAPI").exists()
+            source_root = install_dir if installed_payload else _source_root().resolve()
             self._emit("status", self.t("step_copy"))
             if source_root != install_dir:
                 self._copy_payload(source_root, install_dir)
@@ -279,6 +303,7 @@ class SetupWindow(tk.Tk):
             config = {
                 "python_exe": str(venv_python), "director_script": str(install_dir / "colony_director.py"),
                 "api_url": "http://localhost:8765", "device": device, "interval": 10,
+                "rimworld_path": str(rimworld),
             }
             serialized = json.dumps(config, ensure_ascii=False, indent=2)
             (install_dir / "rimworld-autopilot.json").write_text(serialized, encoding="utf-8")

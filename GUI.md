@@ -3,7 +3,7 @@
 The 0.0.2 RimWorld Autopilot control center is intentionally separate from the colony controller. `autopilot_control.py` is the public launcher (`laya_control.py` remains compatible); the implementation lives in `laya_gui/`:
 
 - `app.py` composes the five user pages and animated navigation shell;
-- `theme.py` owns the dark cartoon palette, typography, shadows and reusable cards;
+- `theme.py` owns semantic dark-theme tokens, typography, shadows, focus-visible buttons, rounded scrollbars, scrollable pages and reusable cards;
 - `i18n.py` owns Russian/English copy and friendly names for internal decisions;
 - `services.py` owns process control, local API checks and export operations;
 - `setup_app.py` is the graphical installation assistant;
@@ -15,9 +15,11 @@ The 0.0.2 RimWorld Autopilot control center is intentionally separate from the c
 2. **Strategy** — the selected doctrine and every direction available in the loaded Core/DLC set.
 3. **Priorities** — eight 0–100 preference weights, a free-form personal note and explicit peaceful/safety boundaries.
 4. **History** — friendly explanations by default; exact JSON is available only after enabling technical mode.
-5. **Settings** — Russian/English switch, diagnostic logging, installer and exports.
+5. **Settings** — Russian/English switch with real flag assets, diagnostic logging, standard Windows uninstall and exports.
 
-The interface uses native Tk widgets and the standard library. It therefore adds no UI framework dependency to the already large local-model installation. Rounded cards, animated buttons and orbit particles are drawn locally. The emblem, panoramic colony art, setup illustration and five navigation illustrations are original project-local PNGs generated with the built-in ImageGen tool; prompts are preserved in `assets/gui/README.md`.
+The interface uses native Tk widgets and the standard library. It therefore adds no UI framework dependency to the already large local-model installation. Rounded cards, animated buttons and orbit particles are drawn locally. The 1240×800 minimum size protects the decision-boundary controls, while long pages remain vertically scrollable. History and page scrollbars use a compact rounded track with keyboard support instead of legacy arrow controls. Buttons expose keyboard focus and Enter/Space activation.
+
+The emblem, panoramic colony art, setup illustrations and five navigation illustrations are original project-local PNGs generated with the built-in ImageGen tool; prompts are preserved in `assets/gui/README.md`. Russian and United Kingdom flags are local Twemoji PNG assets rather than font emoji, so their appearance does not depend on the user's system font or an online renderer. Missing packaged artwork is recorded in `logs/ui-assets.log` instead of silently substituting a network placeholder.
 
 ## Preference contract
 
@@ -27,19 +29,18 @@ Weights guide ordering and model context. They cannot override emergency gates, 
 
 Normal logging keeps compact decisions, outcomes and probability paths. Technical logging additionally records the complete development snapshot/details; combat logging keeps full snapshots only in technical mode.
 
-## Installer
+## Installer and uninstaller
 
-`RimWorld-Autopilot-Setup.exe` is built from `autopilot_setup.py` and `laya_gui/setup_app.py`. It requests administrator rights because its default target is `C:\Program Files\RimWorld Autopilot`. It:
+`installer/RimWorld-Autopilot.iss` produces the public `RimWorld-Autopilot-0.0.2-Setup.exe`. It uses Inno Setup's modern dynamic Windows 11 style, follows the system light/dark preference, displays project-local portrait artwork, requests administrator rights for the Program Files destination and registers the normal Windows uninstaller. It:
 
-1. lets the player choose an application folder and a real RimWorld folder;
-2. offers an optional desktop shortcut, enabled by default;
-3. locates Python 3.10–3.12 or opens the official download page;
-4. copies the application, bilingual UI and complete local artwork set;
-5. creates `.venv` and installs `requirements.txt`;
-6. backs up an existing `Mods/RIMAPI` directory with a timestamp;
-7. copies the bundled modified RIMAPI source/build;
-8. writes `rimworld-autopilot.json` and creates the shortcut when selected.
+1. chooses the Program Files destination and optional desktop shortcut;
+2. copies the application, bilingual UI and complete local artwork set;
+3. creates Start-menu launch and uninstall entries;
+4. extracts `RimWorld-Autopilot-Setup.exe` only into Inno Setup's temporary directory;
+5. optionally runs that friendly assistant to locate Python 3.10–3.12 and a real RimWorld folder;
+6. creates `.venv`, installs `requirements.txt`, backs up/replaces `Mods/RIMAPI` and writes local configuration;
+7. deletes the temporary assistant as setup exits.
 
-The installer does not request an API key, start RimWorld, alter saves or enable mods without the player.
+The installer does not request an API key, start RimWorld, alter saves or enable mods without the player. `unins000.exe` is registered in Windows Installed apps and removes application files and shortcuts. Writable LocalAppData and the game mod are preserved deliberately to avoid destructive surprise.
 
-The release EXE stays beside `requirements.txt`, the Python controller sources and `vendor/RIMAPI`; those adjacent files are the payload it installs. `Build-GUI.ps1` reproduces both unsigned Windows binaries and assembles `dist/rimworld-autopilot-0.0.2.zip` with that complete payload. Build-only dependencies are isolated in `.build-venv` and declared in `requirements-build.txt`.
+`Build-GUI.ps1` reproduces the two internal unsigned Windows binaries, assembles `dist/rimworld-autopilot-0.0.2.zip`, converts the ImageGen emblem into the multi-resolution Windows icon and compiles the standard installer. Build-only dependencies are isolated in `.build-venv` and declared in `requirements-build.txt`; Inno Setup 6.7+ is the only external build prerequisite.

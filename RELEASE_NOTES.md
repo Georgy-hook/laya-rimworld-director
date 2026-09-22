@@ -5,11 +5,13 @@ Development release focused on correcting the decision architecture and the surv
 Highlights:
 
 - renamed the product and repository to **RimWorld Autopilot**, while retaining Laya as the local decision model;
-- redesigned dark fancy-cartoon GUI with rounded cards, animated buttons/orbit particles, a panoramic colony scene, original ImageGen emblem, setup illustration and five coordinated navigation illustrations;
+- redesigned dark fancy-cartoon GUI with semantic color tokens, rounded cards, animated buttons/orbit particles, a panoramic colony scene, original ImageGen emblem, setup illustrations and five coordinated navigation illustrations;
+- protected 1240×800 minimum layout plus scrollable priority/settings pages, modern rounded history scrollbar and keyboard-visible button focus;
+- local real-country flag artwork for Russian/English selection, with packaged-asset diagnostics instead of silent placeholders;
 - complete Russian/English interface with friendly default explanations and a switchable raw technical view;
 - persistent player guidance: eight priority weights, a personal note, peaceful preferences and an enforceable no-unprovoked-raids boundary;
 - compact normal logs plus opt-in diagnostic snapshots in technical logging mode;
-- graphical `RimWorld-Autopilot-Setup.exe` with a Program Files destination, optional desktop shortcut, Python environment, packages, RIMAPI backup/install and local configuration;
+- standard dark/light Windows installer with custom portrait art, Program Files destination, optional desktop shortcut, temporary configuration assistant, registered Installed-apps entry and normal uninstaller;
 - audited doctrine v2 with 30 strategic archetypes covering Core, Royalty, Ideology, Biotech, Anomaly and Odyssey;
 - active-package filtering so unavailable DLC mechanics cannot be selected, while future/mod definitions remain discoverable through live catalogues;
 - conditional doctrine cascade: domain → direction → compatible axes → selected economy product → mineral only for mining;

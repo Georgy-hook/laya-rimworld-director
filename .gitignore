@@ -23,6 +23,7 @@ Laya-Control-Center.exe
 Laya-Setup.exe
 RimWorld-Autopilot.exe
 RimWorld-Autopilot-Setup.exe
+assets/gui/autopilot.ico
 vendor/RIMAPI/Source/**/bin/
 vendor/RIMAPI/Source/**/obj/
 vendor/RIMAPI/1.6/Assemblies/*.pdb

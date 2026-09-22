@@ -46,6 +46,18 @@ Materials/textures: matte painted metal, soft beveled edges, subtle panel seams
 Constraints: actual alpha transparency; no text; no letters; no logos; no trademarks; no game characters; no watermark; one coherent object group only
 ```
 
+## `autopilot-installer-portrait.png`
+
+```text
+Create a polished vertical key art illustration for a Windows installer, 164:314 portrait aspect ratio (approximately 1024x1960 composition, safe central content). Product: “RimWorld Autopilot”, an open-source local AI colony management companion. Fancy cartoon sci-fi style, predominantly deep navy, charcoal, midnight violet, with cyan and soft amber highlights. Show a friendly compact autopilot robot standing beside a glowing miniature frontier colony inside a glass terrarium-like module, with tiny solar panels, crops, stone walls, workshop sparks, and a small rocket silhouette in the distant sky. Clean premium Windows app aesthetic, rounded forms, soft volumetric lighting, subtle layered shadows, crisp but not photorealistic. Leave generous calm negative space near the top and bottom for installer typography. NO text, NO letters, NO logos, NO watermark, NO UI controls, NO brand marks, NO recognizable RimWorld game characters or copied game art. Cohesive with dark fancy-cartoon software dashboard artwork.
+```
+
+This portrait is embedded in the Inno Setup welcome/completion pages and inherited by its standard uninstaller. `autopilot.ico` is a build-time multi-resolution conversion of `autopilot-emblem.png`.
+
+## Language flags
+
+`flag-ru.png` and `flag-gb.png` are the 72 px country-flag assets from the open-source Twemoji project. They are stored locally so language controls do not depend on emoji fonts, ChatGPT previews or a network request. See `THIRD_PARTY_NOTICES.md` for attribution and licensing.
+
 ## Navigation icons
 
 The five navigation images used the following exact shared prompt fields:

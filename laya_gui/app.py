@@ -23,7 +23,10 @@ from .services import (
     load_config, read_pid, request_json, start_director, stop_director, tail_jsonl,
     timestamped_export_name,
 )
-from .theme import COLORS, FONTS, FancyButton, ShadowCard, configure_styles, status_color
+from .theme import (
+    COLORS, FONTS, FancyButton, ModernScrollbar, ScrollablePage, ShadowCard,
+    configure_styles, status_color,
+)
 
 
 class ControlCenter(tk.Tk):
@@ -44,8 +47,8 @@ class ControlCenter(tk.Tk):
         self.current_page = "overview"
         self.animation_tick = 0
         self.title(APP_NAME)
-        self.geometry("1320x820")
-        self.minsize(1040, 690)
+        self.geometry("1440x900")
+        self.minsize(1240, 800)
         self.configure(bg=COLORS["window"])
         configure_styles(self)
         self._build_ui()
@@ -55,10 +58,11 @@ class ControlCenter(tk.Tk):
     def _build_ui(self) -> None:
         self.nav_buttons: dict[str, FancyButton] = {}
         self.ui_images: dict[str, tk.PhotoImage] = {}
-        self.pages: dict[str, tk.Frame] = {}
+        self.pages: dict[str, tk.Widget] = {}
         self.priority_scales: dict[str, ttk.Scale] = {}
         self.priority_values: dict[str, tk.Label] = {}
         self._load_ui_variables()
+        self._load_shared_images()
 
         shell = tk.Frame(self, bg=COLORS["window"])
         shell.pack(fill="both", expand=True)
@@ -89,6 +93,28 @@ class ControlCenter(tk.Tk):
         self.peaceful_trade_var = tk.BooleanVar(value=bool(safety.get("prefer_peaceful_trade")))
         self.protect_food_var = tk.BooleanVar(value=bool(safety.get("protect_food_reserve", True)))
 
+    def _load_shared_images(self) -> None:
+        self.flag_images = {
+            "ru": self._load_ui_image("flag-ru", "flag-ru.png", 3),
+            "en": self._load_ui_image("flag-gb", "flag-gb.png", 3),
+        }
+
+    def _load_ui_image(self, key: str, filename: str, subsample: int = 1) -> tk.PhotoImage | None:
+        asset = RESOURCE_DIR / "assets" / "gui" / filename
+        try:
+            original = tk.PhotoImage(file=str(asset))
+            image = original.subsample(subsample, subsample) if subsample > 1 else original
+            self.ui_images[key] = image
+            return image
+        except (OSError, tk.TclError) as exc:
+            try:
+                self.log_dir.mkdir(parents=True, exist_ok=True)
+                with (self.log_dir / "ui-assets.log").open("a", encoding="utf-8") as handle:
+                    handle.write(f"{datetime.now().isoformat()} | {asset} | {exc}\n")
+            except OSError:
+                pass
+            return None
+
     def _build_sidebar(self) -> None:
         self.mascot_canvas = tk.Canvas(self.sidebar, width=224, height=150, bg=COLORS["sidebar"], highlightthickness=0)
         self.mascot_canvas.pack(pady=(12, 0))
@@ -99,26 +125,19 @@ class ControlCenter(tk.Tk):
             for color in (COLORS["cyan"], COLORS["violet"], COLORS["amber"])
         ]
         self.mascot_item = None
-        asset = RESOURCE_DIR / "assets" / "gui" / "autopilot-emblem.png"
-        try:
-            original = tk.PhotoImage(file=str(asset))
-            self.mascot_image = original.subsample(9, 9)
+        self.mascot_image = self._load_ui_image("emblem", "autopilot-emblem.png", 9)
+        if self.mascot_image:
             self.mascot_item = self.mascot_canvas.create_image(113, 74, image=self.mascot_image)
-        except tk.TclError:
-            self.mascot_image = None
-            self.mascot_canvas.create_text(112, 73, text="✦", fill=COLORS["cyan"], font=("Segoe UI Symbol", 46))
+        else:
+            self.mascot_canvas.create_text(112, 73, text="AUTOPILOT", fill=COLORS["cyan"], font=FONTS["heading"])
         tk.Label(self.sidebar, text="RIMWORLD", bg=COLORS["sidebar"], fg=COLORS["text"], font=("Segoe UI Black", 15)).pack()
         tk.Label(self.sidebar, text="AUTOPILOT", bg=COLORS["sidebar"], fg=COLORS["cyan"], font=("Segoe UI Semibold", 9)).pack(pady=(0, 18))
 
         for page in ("overview", "strategy", "priorities", "history", "settings"):
-            try:
-                original = tk.PhotoImage(file=str(RESOURCE_DIR / "assets" / "gui" / f"nav-{page}.png"))
-                self.ui_images[f"nav-{page}"] = original.subsample(32, 32)
-            except tk.TclError:
-                self.ui_images[f"nav-{page}"] = None  # type: ignore[assignment]
+            icon = self._load_ui_image(f"nav-{page}", f"nav-{page}.png", 32)
             button = FancyButton(
                 self.sidebar, text=tr(self.language, page), width=208, height=52, variant="ghost", align="left",
-                image=self.ui_images[f"nav-{page}"],
+                image=icon,
                 command=lambda name=page: self.switch_page(name),
             )
             button.pack(padx=10, pady=2)
@@ -137,8 +156,9 @@ class ControlCenter(tk.Tk):
         self.page_subtitle = tk.Label(titles, text="", bg=COLORS["window"], fg=COLORS["muted"], font=FONTS["body"], anchor="w")
         self.page_subtitle.pack(anchor="w", pady=(2, 0))
 
+        target_language = "en" if self.language == "ru" else "ru"
         self.language_button = FancyButton(
-            header, text="🇬🇧  EN" if self.language == "ru" else "🇷🇺  RU", width=92, height=36, variant="soft",
+            header, text=target_language.upper(), image=self.flag_images.get(target_language), width=94, height=38, variant="soft",
             command=lambda: self.set_language("en" if self.language == "ru" else "ru"),
         )
         self.language_button.pack(side="right", padx=(10, 0))
@@ -147,10 +167,14 @@ class ControlCenter(tk.Tk):
         self.laya_chip = tk.Label(header, text=tr(self.language, "laya_offline"), bg=COLORS["panel"], fg=COLORS["red"], padx=12, pady=7, font=("Segoe UI Semibold", 9))
         self.laya_chip.pack(side="right", padx=5)
 
-    def _new_page(self, name: str) -> tk.Frame:
-        page = tk.Frame(self.page_host, bg=COLORS["window"])
-        self.pages[name] = page
-        return page
+    def _new_page(self, name: str, *, scroll: bool = False) -> tk.Frame:
+        container = tk.Frame(self.page_host, bg=COLORS["window"])
+        self.pages[name] = container
+        if not scroll:
+            return container
+        viewport = ScrollablePage(container)
+        viewport.pack(fill="both", expand=True)
+        return viewport.body
 
     def _build_overview_page(self) -> None:
         page = self._new_page("overview")
@@ -158,12 +182,10 @@ class ControlCenter(tk.Tk):
         art.pack(fill="x", pady=(0, 14))
         self.hero_canvas = tk.Canvas(art.body, height=188, bg=COLORS["navy"], highlightthickness=0, bd=0)
         self.hero_canvas.pack(fill="x")
-        try:
-            original = tk.PhotoImage(file=str(RESOURCE_DIR / "assets" / "gui" / "autopilot-hero.png"))
-            self.hero_image = original.subsample(2, 2)
+        self.hero_image = self._load_ui_image("hero", "autopilot-hero.png", 2)
+        if self.hero_image:
             self.hero_art_item = self.hero_canvas.create_image(0, 0, image=self.hero_image, anchor="n")
-        except tk.TclError:
-            self.hero_image = None
+        else:
             self.hero_art_item = None
         self.hero_canvas.create_rectangle(28, 28, 530, 160, fill="#0B1021", outline=COLORS["line"], width=1)
         self.hero_canvas.create_text(52, 52, text="RIMWORLD AUTOPILOT", fill=COLORS["cyan"], font=("Segoe UI Black", 11), anchor="nw")
@@ -183,8 +205,8 @@ class ControlCenter(tk.Tk):
 
         controls = tk.Frame(hero.body, bg=COLORS["panel"])
         controls.pack(side="right", padx=(20, 0))
-        FancyButton(controls, text=tr(self.language, "start"), width=216, variant="accent", icon="▶", command=self.start_laya).grid(row=0, column=0, columnspan=2, pady=(0, 7))
-        FancyButton(controls, text=tr(self.language, "stop"), width=216, variant="danger", icon="■", command=self.stop_laya).grid(row=1, column=0, columnspan=2, pady=(0, 7))
+        FancyButton(controls, text=tr(self.language, "start"), width=216, variant="accent", command=self.start_laya).grid(row=0, column=0, columnspan=2, pady=(0, 7))
+        FancyButton(controls, text=tr(self.language, "stop"), width=216, variant="danger", command=self.stop_laya).grid(row=1, column=0, columnspan=2, pady=(0, 7))
         FancyButton(controls, text=tr(self.language, "pause"), width=104, variant="soft", command=lambda: self.set_speed(0)).grid(row=2, column=0, padx=(0, 4))
         FancyButton(controls, text=tr(self.language, "resume"), width=104, variant="soft", command=lambda: self.set_speed(1)).grid(row=2, column=1, padx=(4, 0))
 
@@ -221,7 +243,7 @@ class ControlCenter(tk.Tk):
         self.direction_catalog.configure(state="disabled")
 
     def _build_priorities_page(self) -> None:
-        page = self._new_page("priorities")
+        page = self._new_page("priorities", scroll=True)
         grid = ShadowCard(page, padx=20, pady=16)
         grid.pack(fill="x", pady=(0, 14))
         priorities = self.preferences.get("priorities") or {}
@@ -270,24 +292,26 @@ class ControlCenter(tk.Tk):
         ttk.Checkbutton(toolbar, text=tr(self.language, "technical_mode"), variable=self.tech_var, command=self.toggle_technical).pack(side="right")
         history = ShadowCard(page, padx=10, pady=10)
         history.pack(fill="both", expand=True)
+        table = tk.Frame(history.body, bg=COLORS["panel"])
+        table.pack(fill="both", expand=True)
         columns = ("time", "choice", "confidence", "result")
-        self.tree = ttk.Treeview(history.body, columns=columns, show="headings", selectmode="browse", height=9)
+        self.tree = ttk.Treeview(table, columns=columns, show="headings", selectmode="browse", height=9)
         headings = {"time": "Время" if self.language == "ru" else "Time", "choice": "Выбор Laya" if self.language == "ru" else "Laya's choice", "confidence": tr(self.language, "confidence"), "result": tr(self.language, "result")}
         widths = {"time": 135, "choice": 360, "confidence": 110, "result": 360}
         for name in columns:
             self.tree.heading(name, text=headings[name])
             self.tree.column(name, width=widths[name], anchor="w")
-        scroll = ttk.Scrollbar(history.body, orient="vertical", command=self.tree.yview)
+        scroll = ModernScrollbar(table, command=self.tree.yview)
         self.tree.configure(yscrollcommand=scroll.set)
-        self.tree.pack(side="top", fill="both", expand=True)
-        scroll.place(relx=1.0, rely=0, relheight=0.52, anchor="ne")
+        scroll.pack(side="right", fill="y", padx=(8, 0))
+        self.tree.pack(side="left", fill="both", expand=True)
         self.tree.bind("<<TreeviewSelect>>", self.show_selected)
         tk.Label(history.body, text=tr(self.language, "details"), bg=COLORS["panel"], fg=COLORS["violet"], font=FONTS["heading"]).pack(anchor="w", pady=(12, 5))
         self.details = tk.Text(history.body, height=9, bg=COLORS["panel_alt"], fg=COLORS["text"], relief="flat", font=FONTS["body"] if not self.tech_var.get() else FONTS["mono"], wrap="word", padx=12, pady=10, cursor="arrow")
         self.details.pack(fill="both", expand=True)
 
     def _build_settings_page(self) -> None:
-        page = self._new_page("settings")
+        page = self._new_page("settings", scroll=True)
         row = tk.Frame(page, bg=COLORS["window"])
         row.pack(fill="x")
         language = ShadowCard(row)
@@ -295,19 +319,19 @@ class ControlCenter(tk.Tk):
         tk.Label(language.body, text=tr(self.language, "language"), bg=COLORS["panel"], fg=COLORS["cyan"], font=FONTS["heading"]).pack(anchor="w", pady=(0, 10))
         buttons = tk.Frame(language.body, bg=COLORS["panel"])
         buttons.pack(anchor="w")
-        FancyButton(buttons, text="🇷🇺  Русский", width=146, variant="accent" if self.language == "ru" else "soft", command=lambda: self.set_language("ru")).pack(side="left", padx=(0, 7))
-        FancyButton(buttons, text="🇬🇧  English", width=146, variant="accent" if self.language == "en" else "soft", command=lambda: self.set_language("en")).pack(side="left")
+        FancyButton(buttons, text="Русский", image=self.flag_images.get("ru"), width=150, variant="accent" if self.language == "ru" else "soft", command=lambda: self.set_language("ru")).pack(side="left", padx=(0, 7))
+        FancyButton(buttons, text="English", image=self.flag_images.get("en"), width=150, variant="accent" if self.language == "en" else "soft", command=lambda: self.set_language("en")).pack(side="left")
 
         logging = ShadowCard(row)
         logging.pack(side="left", fill="both", expand=True, padx=(7, 0))
         ttk.Checkbutton(logging.body, text=tr(self.language, "technical_logging"), variable=self.tech_var, command=self.toggle_technical).pack(anchor="w")
         tk.Label(logging.body, text=tr(self.language, "technical_help"), bg=COLORS["panel"], fg=COLORS["muted"], font=FONTS["small"], justify="left", wraplength=440).pack(anchor="w", pady=(8, 0))
 
-        installer = ShadowCard(page)
-        installer.pack(fill="x", pady=14)
-        tk.Label(installer.body, text=tr(self.language, "installer"), bg=COLORS["panel"], fg=COLORS["amber"], font=FONTS["heading"]).pack(anchor="w")
-        tk.Label(installer.body, text=tr(self.language, "install_help"), bg=COLORS["panel"], fg=COLORS["muted"], font=FONTS["body"], justify="left", wraplength=800).pack(side="left", pady=(8, 0))
-        ttk.Button(installer.body, text=tr(self.language, "run_installer"), style="Accent.TButton", command=self.open_installer).pack(side="right", padx=(15, 0))
+        maintenance = ShadowCard(page)
+        maintenance.pack(fill="x", pady=14)
+        tk.Label(maintenance.body, text=tr(self.language, "maintenance"), bg=COLORS["panel"], fg=COLORS["amber"], font=FONTS["heading"]).pack(anchor="w")
+        tk.Label(maintenance.body, text=tr(self.language, "maintenance_help"), bg=COLORS["panel"], fg=COLORS["muted"], font=FONTS["body"], justify="left", wraplength=800).pack(side="left", pady=(8, 0))
+        ttk.Button(maintenance.body, text=tr(self.language, "uninstall"), style="Danger.TButton", command=self.open_uninstaller).pack(side="right", padx=(15, 0))
 
         exports = ShadowCard(page)
         exports.pack(fill="x")
@@ -423,16 +447,13 @@ class ControlCenter(tk.Tk):
         except OSError as exc:
             messagebox.showerror(APP_NAME, str(exc))
 
-    def open_installer(self) -> None:
-        executable = BASE_DIR / "RimWorld-Autopilot-Setup.exe"
-        script = BASE_DIR / "autopilot_setup.py"
+    def open_uninstaller(self) -> None:
+        executable = BASE_DIR / "unins000.exe"
         try:
             if executable.exists():
                 subprocess.Popen([str(executable)], cwd=BASE_DIR)
-            elif script.exists():
-                subprocess.Popen([sys.executable, str(script)], cwd=BASE_DIR)
             else:
-                raise FileNotFoundError("RimWorld-Autopilot-Setup.exe")
+                os.startfile("ms-settings:appsfeatures")
         except OSError as exc:
             messagebox.showerror(APP_NAME, f"{tr(self.language, 'error')}: {exc}")
 
