@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
@@ -25,7 +26,7 @@ from .services import (
 )
 from .theme import (
     COLORS, FONTS, FancyButton, ModernScrollbar, ScrollablePage, ShadowCard,
-    configure_styles, status_color,
+    configure_styles, render_photo, rounded_rectangle, status_color,
 )
 
 
@@ -46,6 +47,9 @@ class ControlCenter(tk.Tk):
         self.game_online = False
         self.current_page = "overview"
         self.animation_tick = 0
+        self.animation_started = time.perf_counter()
+        self._hero_resize_job: str | None = None
+        self._hero_render_width = 0
         self.title(APP_NAME)
         self.geometry("1440x900")
         self.minsize(1240, 800)
@@ -53,9 +57,11 @@ class ControlCenter(tk.Tk):
         configure_styles(self)
         self._build_ui()
         self.after(150, self.refresh_all)
-        self.after(70, self._animate_mascot)
+        self.after(16, self._animate_mascot)
 
     def _build_ui(self) -> None:
+        self._hero_resize_job = None
+        self._hero_render_width = 0
         self.nav_buttons: dict[str, FancyButton] = {}
         self.ui_images: dict[str, tk.PhotoImage] = {}
         self.pages: dict[str, tk.Widget] = {}
@@ -95,15 +101,14 @@ class ControlCenter(tk.Tk):
 
     def _load_shared_images(self) -> None:
         self.flag_images = {
-            "ru": self._load_ui_image("flag-ru", "flag-ru.png", 3),
-            "en": self._load_ui_image("flag-gb", "flag-gb.png", 3),
+            "ru": self._load_ui_image("flag-ru", "flag-ru.png", (24, 24)),
+            "en": self._load_ui_image("flag-gb", "flag-gb.png", (24, 24)),
         }
 
-    def _load_ui_image(self, key: str, filename: str, subsample: int = 1) -> tk.PhotoImage | None:
+    def _load_ui_image(self, key: str, filename: str, size: tuple[int, int]) -> tk.PhotoImage | None:
         asset = RESOURCE_DIR / "assets" / "gui" / filename
         try:
-            original = tk.PhotoImage(file=str(asset))
-            image = original.subsample(subsample, subsample) if subsample > 1 else original
+            image = render_photo(asset, size)
             self.ui_images[key] = image
             return image
         except (OSError, tk.TclError) as exc:
@@ -125,7 +130,7 @@ class ControlCenter(tk.Tk):
             for color in (COLORS["cyan"], COLORS["violet"], COLORS["amber"])
         ]
         self.mascot_item = None
-        self.mascot_image = self._load_ui_image("emblem", "autopilot-emblem.png", 9)
+        self.mascot_image = self._load_ui_image("emblem", "autopilot-emblem.png", (112, 112))
         if self.mascot_image:
             self.mascot_item = self.mascot_canvas.create_image(113, 74, image=self.mascot_image)
         else:
@@ -134,7 +139,7 @@ class ControlCenter(tk.Tk):
         tk.Label(self.sidebar, text="AUTOPILOT", bg=COLORS["sidebar"], fg=COLORS["cyan"], font=("Segoe UI Semibold", 9)).pack(pady=(0, 18))
 
         for page in ("overview", "strategy", "priorities", "history", "settings"):
-            icon = self._load_ui_image(f"nav-{page}", f"nav-{page}.png", 32)
+            icon = self._load_ui_image(f"nav-{page}", f"nav-{page}.png", (34, 34))
             button = FancyButton(
                 self.sidebar, text=tr(self.language, page), width=208, height=52, variant="ghost", align="left",
                 image=icon,
@@ -180,14 +185,11 @@ class ControlCenter(tk.Tk):
         page = self._new_page("overview")
         art = ShadowCard(page, padx=0, pady=0, radius=22)
         art.pack(fill="x", pady=(0, 14))
-        self.hero_canvas = tk.Canvas(art.body, height=188, bg=COLORS["navy"], highlightthickness=0, bd=0)
+        self.hero_canvas = tk.Canvas(art.body, height=188, bg=COLORS["panel"], highlightthickness=0, bd=0)
         self.hero_canvas.pack(fill="x")
-        self.hero_image = self._load_ui_image("hero", "autopilot-hero.png", 2)
-        if self.hero_image:
-            self.hero_art_item = self.hero_canvas.create_image(0, 0, image=self.hero_image, anchor="n")
-        else:
-            self.hero_art_item = None
-        self.hero_canvas.create_rectangle(28, 28, 530, 160, fill="#0B1021", outline=COLORS["line"], width=1)
+        self.hero_image = None
+        self.hero_art_item = None
+        rounded_rectangle(self.hero_canvas, 28, 28, 530, 160, 18, fill="#0B1021", outline=COLORS["line"], width=1)
         self.hero_canvas.create_text(52, 52, text="RIMWORLD AUTOPILOT", fill=COLORS["cyan"], font=("Segoe UI Black", 11), anchor="nw")
         self.hero_canvas.create_text(52, 82, text=tr(self.language, "hero_title"), fill=COLORS["text"], font=("Segoe UI Semibold", 21), anchor="nw")
         self.hero_canvas.create_text(52, 121, text=tr(self.language, "hero_subtitle"), fill=COLORS["muted"], font=FONTS["body"], anchor="nw")
@@ -360,6 +362,9 @@ class ControlCenter(tk.Tk):
         self.preferences["language"] = language
         laya_preferences.save_preferences(self.preferences, PREFERENCES_PATH)
         self.last_log_signature = None
+        if self._hero_resize_job:
+            self.after_cancel(self._hero_resize_job)
+            self._hero_resize_job = None
         for child in self.winfo_children():
             child.destroy()
         self._build_ui()
@@ -624,24 +629,43 @@ class ControlCenter(tk.Tk):
         self.details.configure(state="disabled")
 
     def _animate_mascot(self) -> None:
-        self.animation_tick += 1
+        elapsed = time.perf_counter() - self.animation_started
         if getattr(self, "mascot_item", None) and self.mascot_canvas.winfo_exists():
-            y = 74 + math.sin(self.animation_tick / 9.0) * 3
+            y = 74 + math.sin(elapsed * 1.9) * 3
             self.mascot_canvas.coords(self.mascot_item, 113, y)
             for index, item in enumerate(getattr(self, "orbit_items", [])):
-                angle = self.animation_tick / 20.0 + index * math.tau / 3
+                angle = elapsed * 0.72 + index * math.tau / 3
                 x = 112 + math.cos(angle) * 73
                 particle_y = 74 + math.sin(angle) * 56
                 self.mascot_canvas.coords(item, x - 3, particle_y - 3, x + 3, particle_y + 3)
-        if getattr(self, "hero_art_item", None) and self.hero_canvas.winfo_exists():
-            width = self.hero_canvas.winfo_width()
-            self.hero_canvas.coords(self.hero_art_item, width / 2 + math.sin(self.animation_tick / 18.0) * 5, -107)
-        self.after(70, self._animate_mascot)
+        self.after(16, self._animate_mascot)
 
     def _position_hero(self, event: tk.Event) -> None:
-        if getattr(self, "hero_art_item", None):
-            drift = math.sin(self.animation_tick / 18.0) * 5
-            self.hero_canvas.coords(self.hero_art_item, event.width / 2 + drift, -107)
+        width = max(1, event.width)
+        if abs(width - self._hero_render_width) < 2:
+            return
+        if self._hero_resize_job:
+            self.after_cancel(self._hero_resize_job)
+        self._hero_resize_job = self.after(35, lambda target=width: self._render_hero(target))
+
+    def _render_hero(self, width: int) -> None:
+        self._hero_resize_job = None
+        asset = RESOURCE_DIR / "assets" / "gui" / "autopilot-hero.png"
+        try:
+            self.hero_image = render_photo(asset, (width, 188), cover=True, radius=18)
+            if self.hero_art_item is None:
+                self.hero_art_item = self.hero_canvas.create_image(0, 0, image=self.hero_image, anchor="nw")
+                self.hero_canvas.tag_lower(self.hero_art_item)
+            else:
+                self.hero_canvas.itemconfigure(self.hero_art_item, image=self.hero_image)
+            self._hero_render_width = width
+        except (OSError, tk.TclError) as exc:
+            try:
+                self.log_dir.mkdir(parents=True, exist_ok=True)
+                with (self.log_dir / "ui-assets.log").open("a", encoding="utf-8") as handle:
+                    handle.write(f"{datetime.now().isoformat()} | {asset} | {exc}\n")
+            except OSError:
+                pass
 
 
 def run() -> None:

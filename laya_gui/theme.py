@@ -3,7 +3,10 @@ from __future__ import annotations
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import ttk
+from pathlib import Path
 from typing import Callable
+
+from PIL import Image, ImageChops, ImageDraw, ImageOps, ImageTk
 
 
 COLORS = {
@@ -91,8 +94,8 @@ class ShadowCard(tk.Frame):
     def _redraw(self, event: tk.Event) -> None:
         width, height = max(1, event.width), max(1, event.height)
         self.canvas.delete("surface")
-        _rounded_rectangle(self.canvas, 4, 7, width - 2, height - 1, self.radius, fill=COLORS["shadow"], outline="", tags="surface")
-        _rounded_rectangle(self.canvas, 1, 1, width - 5, height - 6, self.radius, fill=COLORS["panel"], outline=COLORS["line"], width=1, tags="surface")
+        rounded_rectangle(self.canvas, 4, 7, width - 2, height - 1, self.radius, fill=COLORS["shadow"], outline="", tags="surface")
+        rounded_rectangle(self.canvas, 1, 1, width - 5, height - 6, self.radius, fill=COLORS["panel"], outline=COLORS["line"], width=1, tags="surface")
         self.canvas.tag_lower("surface")
         self.canvas.coords(self._body_window, 14, 12)
         self.canvas.itemconfigure(self._body_window, width=max(1, width - 32), height=max(1, height - 30))
@@ -167,7 +170,7 @@ class FancyButton(tk.Canvas):
         self.delete("all")
         outline = COLORS["focus"] if self._focused else ""
         outline_width = 2 if self._focused else 0
-        _rounded_rectangle(
+        rounded_rectangle(
             self, 2, 2, width - 3, height - 3, min(15, height // 2),
             fill=fill, outline=outline, width=outline_width,
         )
@@ -280,9 +283,9 @@ class ModernScrollbar(tk.Canvas):
         width = max(1, self.winfo_width())
         top, bottom, thumb_top, thumb_bottom = self._geometry()
         self.delete("all")
-        _rounded_rectangle(self, 3, top, width - 3, bottom, 4, fill=COLORS["panel_alt"], outline="")
+        rounded_rectangle(self, 3, top, width - 3, bottom, 4, fill=COLORS["panel_alt"], outline="")
         if self._last - self._first < 0.999:
-            _rounded_rectangle(self, 2, thumb_top, width - 2, thumb_bottom, 5, fill=COLORS["violet"], outline="")
+            rounded_rectangle(self, 2, thumb_top, width - 2, thumb_bottom, 5, fill=COLORS["violet"], outline="")
 
     def _press(self, event: tk.Event) -> None:
         self.focus_set()
@@ -346,7 +349,7 @@ def _widget_background(widget: tk.Misc) -> str:
         return COLORS["window"]
 
 
-def _rounded_rectangle(canvas: tk.Canvas, x1: float, y1: float, x2: float, y2: float, radius: float, **kwargs):
+def rounded_rectangle(canvas: tk.Canvas, x1: float, y1: float, x2: float, y2: float, radius: float, **kwargs):
     radius = max(1, min(radius, (x2 - x1) / 2, (y2 - y1) / 2))
     points = (
         x1 + radius, y1, x2 - radius, y1, x2, y1, x2, y1 + radius,
@@ -354,6 +357,39 @@ def _rounded_rectangle(canvas: tk.Canvas, x1: float, y1: float, x2: float, y2: f
         x1, y2, x1, y2 - radius, x1, y1 + radius, x1, y1,
     )
     return canvas.create_polygon(points, smooth=True, splinesteps=30, **kwargs)
+
+
+def render_photo(
+    source: str | Path | Image.Image,
+    size: tuple[int, int],
+    *,
+    cover: bool = False,
+    radius: int = 0,
+) -> ImageTk.PhotoImage:
+    """Decode and resize artwork with high-quality filtering for Tk."""
+
+    width, height = max(1, int(size[0])), max(1, int(size[1]))
+    if isinstance(source, Image.Image):
+        image = source.copy().convert("RGBA")
+    else:
+        with Image.open(source) as opened:
+            image = opened.convert("RGBA")
+    if cover:
+        image = ImageOps.fit(image, (width, height), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+    else:
+        image = image.resize((width, height), Image.Resampling.LANCZOS)
+    if radius:
+        existing_alpha = image.getchannel("A")
+        scale = 4
+        mask = Image.new("L", (width * scale, height * scale), 0)
+        ImageDraw.Draw(mask).rounded_rectangle(
+            (0, 0, width * scale - 1, height * scale - 1),
+            radius=radius * scale,
+            fill=255,
+        )
+        mask = mask.resize((width, height), Image.Resampling.LANCZOS)
+        image.putalpha(ImageChops.multiply(existing_alpha, mask))
+    return ImageTk.PhotoImage(image)
 
 
 def _mix_color(widget: tk.Misc, first: str, second: str, amount: float) -> str:

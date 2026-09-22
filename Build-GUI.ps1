@@ -11,6 +11,7 @@ $icon = Join-Path $assetRoot "autopilot-emblem.png"
 $installerIcon = Join-Path $assetRoot "autopilot.ico"
 $distribution = Join-Path $projectRoot "dist"
 $installerScript = Join-Path $projectRoot "installer\RimWorld-Autopilot.iss"
+$assetValidator = Join-Path $projectRoot "tools\validate_gui_assets.py"
 $innoCandidates = @(
     (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
     "C:\Program Files\Inno Setup 6\ISCC.exe",
@@ -23,27 +24,7 @@ try {
         & $PythonExe -m venv $buildEnvironment
     }
     & $builder -m pip install -r (Join-Path $projectRoot "requirements-build.txt")
-    $assetValidation = @'
-from pathlib import Path
-import sys
-import tkinter as tk
-from PIL import Image
-
-root = tk.Tk()
-root.withdraw()
-errors = []
-for path in sorted(Path(sys.argv[1]).glob("*.png")):
-    with Image.open(path) as decoded:
-        expected = decoded.size
-    photo = tk.PhotoImage(file=str(path.resolve()))
-    actual = (photo.width(), photo.height())
-    if actual != expected:
-        errors.append(f"{path.name}: Pillow={expected}, Tk={actual}")
-root.destroy()
-if errors:
-    raise SystemExit("GUI assets are not Tk-compatible PNGs:\n" + "\n".join(errors))
-'@
-    & $builder -c $assetValidation $assetRoot
+    & $builder $assetValidator $assetRoot
     if ($LASTEXITCODE -ne 0) { throw "GUI asset compatibility validation failed." }
     & $builder -c "from PIL import Image; import sys; Image.open(sys.argv[1]).convert('RGBA').save(sys.argv[2], sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])" $icon $installerIcon
     if ($LASTEXITCODE -ne 0) { throw "Windows icon conversion failed." }
@@ -76,7 +57,7 @@ if errors:
         Where-Object { ($_.Extension -in @(".py", ".ps1", ".cmd", ".md", ".txt")) -or ($_.Name -in @("LICENSE", "RIMAPI_UPSTREAM_COMMIT")) } |
         Where-Object { $_.Name -notin @("laya-control.json", "laya-preferences.json", "rimworld-autopilot.json", "autopilot-preferences.json") } |
         Copy-Item -Destination $releaseDirectory -Force
-    foreach ($folder in @("assets", "laya_gui", "vendor")) {
+    foreach ($folder in @("assets", "laya_gui", "tools", "vendor")) {
         Copy-Item -LiteralPath (Join-Path $projectRoot $folder) -Destination $releaseDirectory -Recurse -Force
     }
     Get-ChildItem -LiteralPath $releaseDirectory -Directory -Filter "__pycache__" -Recurse |

@@ -14,7 +14,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .services import BASE_DIR, RESOURCE_DIR
-from .theme import COLORS, FONTS, FancyButton, ShadowCard, configure_styles
+from .theme import COLORS, FONTS, FancyButton, ShadowCard, configure_styles, render_photo
 
 
 PRODUCT_NAME = "RimWorld Autopilot"
@@ -116,7 +116,7 @@ class SetupWindow(tk.Tk):
         art_panel.pack(side="left", fill="y", padx=(0, 12))
         art_canvas = tk.Canvas(art_panel.body, width=330, height=628, bg=COLORS["navy"], highlightthickness=0)
         art_canvas.pack()
-        self.setup_art = self._load_image("setup-art", "autopilot-setup-kit.png", 4)
+        self.setup_art = self._load_image("setup-art", "autopilot-setup-kit.png", (300, 274))
         if self.setup_art:
             art_canvas.create_image(165, 285, image=self.setup_art)
         else:
@@ -130,8 +130,8 @@ class SetupWindow(tk.Tk):
         right.pack(side="left", fill="both", expand=True, padx=(12, 0))
         language = tk.Frame(right, bg=COLORS["window"])
         language.pack(fill="x")
-        ru_flag = self._load_image("flag-ru", "flag-ru.png", 3)
-        en_flag = self._load_image("flag-en", "flag-gb.png", 3)
+        ru_flag = self._load_image("flag-ru", "flag-ru.png", (24, 24))
+        en_flag = self._load_image("flag-en", "flag-gb.png", (24, 24))
         FancyButton(language, text="RU", image=ru_flag, width=84, height=36, variant="accent" if self.language == "ru" else "soft", command=lambda: self._set_language("ru")).pack(side="right", padx=(6, 0))
         FancyButton(language, text="EN", image=en_flag, width=84, height=36, variant="accent" if self.language == "en" else "soft", command=lambda: self._set_language("en")).pack(side="right")
         tk.Label(right, text=self.t("title"), bg=COLORS["window"], fg=COLORS["text"], font=FONTS["display"]).pack(anchor="w", pady=(14, 0))
@@ -156,12 +156,11 @@ class SetupWindow(tk.Tk):
         self.install_button = FancyButton(card.body, text=self.t("install"), width=220, height=46, variant="accent", command=self._begin)
         self.install_button.pack(side="bottom", anchor="e", pady=(14, 0))
 
-    def _load_image(self, key: str, filename: str, subsample: int = 1) -> tk.PhotoImage | None:
+    def _load_image(self, key: str, filename: str, size: tuple[int, int]) -> tk.PhotoImage | None:
         if key in self.ui_images:
             return self.ui_images[key]
         try:
-            original = tk.PhotoImage(file=str(RESOURCE_DIR / "assets" / "gui" / filename))
-            image = original.subsample(subsample, subsample) if subsample > 1 else original
+            image = render_photo(RESOURCE_DIR / "assets" / "gui" / filename, size)
             self.ui_images[key] = image
             return image
         except (OSError, tk.TclError):
