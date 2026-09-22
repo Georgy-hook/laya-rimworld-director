@@ -1,6 +1,6 @@
 # Generated GUI artwork
 
-These project-local PNG files were generated with the built-in ImageGen tool. Packaged applications load them locally and never depend on generation cache paths or an online image service.
+These project-local PNG files were generated with the built-in ImageGen tool. Packaged applications load them locally and never depend on generation cache paths or an online image service. ImageGen outputs are losslessly normalized to ordinary single-image PNG files before commit because Tk's native decoder can otherwise expose the embedded OpenAI placeholder rather than the final pixels. `Build-GUI.ps1` compares every asset's Pillow and Tk dimensions and stops the release if the two decoders disagree.
 
 ## `autopilot-emblem.png`
 

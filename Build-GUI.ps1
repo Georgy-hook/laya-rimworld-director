@@ -23,6 +23,28 @@ try {
         & $PythonExe -m venv $buildEnvironment
     }
     & $builder -m pip install -r (Join-Path $projectRoot "requirements-build.txt")
+    $assetValidation = @'
+from pathlib import Path
+import sys
+import tkinter as tk
+from PIL import Image
+
+root = tk.Tk()
+root.withdraw()
+errors = []
+for path in sorted(Path(sys.argv[1]).glob("*.png")):
+    with Image.open(path) as decoded:
+        expected = decoded.size
+    photo = tk.PhotoImage(file=str(path.resolve()))
+    actual = (photo.width(), photo.height())
+    if actual != expected:
+        errors.append(f"{path.name}: Pillow={expected}, Tk={actual}")
+root.destroy()
+if errors:
+    raise SystemExit("GUI assets are not Tk-compatible PNGs:\n" + "\n".join(errors))
+'@
+    & $builder -c $assetValidation $assetRoot
+    if ($LASTEXITCODE -ne 0) { throw "GUI asset compatibility validation failed." }
     & $builder -c "from PIL import Image; import sys; Image.open(sys.argv[1]).convert('RGBA').save(sys.argv[2], sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])" $icon $installerIcon
     if ($LASTEXITCODE -ne 0) { throw "Windows icon conversion failed." }
 
