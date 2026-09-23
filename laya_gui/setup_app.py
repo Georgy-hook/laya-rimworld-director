@@ -59,7 +59,9 @@ SETUP_TEXT = {
         "done": "RimWorld Autopilot установлен. Включите Harmony и RIMAPI — RimWorld Autopilot в списке модов, перезапустите игру и откройте приложение с рабочего стола.",
         "invalid": "В выбранной папке не найден RimWorldWin64.exe.", "invalid_install": "Выберите отдельную папку установки.",
         "error": "Не удалось завершить установку", "step_copy": "Размещаю приложение и иллюстрации…",
-        "step_python": "Создаю отдельное окружение Python…", "step_packages": "Устанавливаю модель и необходимые пакеты…",
+        "step_python": "Создаю отдельное окружение Python…", "step_packages": "Устанавливаю необходимые пакеты…",
+        "step_model": "Загружаю Laya для первого запуска… Это может занять несколько минут.",
+        "model_failed": "Не удалось загрузить Laya. Проверьте интернет и свободное место, затем повторите установку.",
         "step_mod": "Подключаю игровой мод…", "step_config": "Сохраняю настройки и создаю ярлык…",
         "privacy": "Модель работает локально. Установщик не просит ключ API и не отправляет сохранения в интернет.",
         "art_caption": "Локальный ИИ-пилот\nдля живой колонии",
@@ -74,7 +76,9 @@ SETUP_TEXT = {
         "done": "RimWorld Autopilot is installed. Enable Harmony and RIMAPI — RimWorld Autopilot in RimWorld's mod list, restart the game, then open the desktop shortcut.",
         "invalid": "RimWorldWin64.exe was not found in the selected folder.", "invalid_install": "Choose a separate installation folder.",
         "error": "Setup could not finish", "step_copy": "Installing the application and artwork…",
-        "step_python": "Creating an isolated Python environment…", "step_packages": "Installing the model and required packages…",
+        "step_python": "Creating an isolated Python environment…", "step_packages": "Installing the required packages…",
+        "step_model": "Downloading Laya for first launch… This may take several minutes.",
+        "model_failed": "Could not download Laya. Check your Internet connection and free disk space, then retry setup.",
         "step_mod": "Connecting the game mod…", "step_config": "Saving settings and creating the shortcut…",
         "privacy": "The model runs locally. Setup does not ask for an API key or upload save files.",
         "art_caption": "A local AI autopilot\nfor a living colony",
@@ -89,7 +93,7 @@ class SetupWindow(tk.Tk):
             self.withdraw()
         self.language = "ru"
         self.events: queue.Queue[tuple[str, str]] = queue.Queue()
-        self.title(f"{PRODUCT_NAME} 0.0.2 — Setup")
+        self.title(f"{PRODUCT_NAME} 0.0.3 — Setup")
         self.geometry("980x700")
         self.resizable(False, False)
         self.configure(bg=COLORS["window"])
@@ -288,6 +292,11 @@ class SetupWindow(tk.Tk):
             self._emit("status", self.t("step_packages"))
             self._run([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"], install_dir)
             self._run([str(venv_python), "-m", "pip", "install", "-r", str(install_dir / "requirements.txt")], install_dir)
+            self._emit("status", self.t("step_model"))
+            try:
+                self._run([str(venv_python), str(install_dir / "rimworld_laya.py"), "download-model"], install_dir)
+            except subprocess.CalledProcessError as exc:
+                raise RuntimeError(self.t("model_failed")) from exc
             self._emit("status", self.t("step_mod"))
             source = (install_dir / "vendor" / "RIMAPI").resolve()
             mods = (rimworld / "Mods").resolve()

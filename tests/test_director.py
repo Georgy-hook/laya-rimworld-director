@@ -64,7 +64,7 @@ class DirectorTests(unittest.TestCase):
         self.assertIn("7:Stun", options)
         self.assertIn("heat 12/50", options["7:Stun"]["summary"])
 
-    def test_combat_tactics_use_existing_defenses_and_detect_kidnapper(self):
+    def test_combat_tactics_use_existing_defenses_and_focus_kidnapper(self):
         snapshot = {"combat": {
             "colonists": [{"id": 1, "health": 1, "has_ranged_weapon": True, "is_dead": False,
                             "is_downed": False, "distance_to_nearest_opponent": 12}],
@@ -73,8 +73,9 @@ class DirectorTests(unittest.TestCase):
             "defenses": [{"kind": "trap"}, {"kind": "door"}], "available_weapons": [],
         }}
         options = colony_combat.available_tactics(snapshot)
-        self.assertIn("intercept_kidnapper", options)
-        self.assertIn("killbox_hold", options)
+        self.assertIn("focus_fire", options)
+        self.assertNotIn("intercept_kidnapper", options)
+        self.assertNotIn("killbox_hold", options)
         self.assertIn("fallback_line", options)
 
     def test_unknown_mod_event_gets_safe_generic_handler(self):
@@ -269,7 +270,39 @@ class DirectorTests(unittest.TestCase):
         snapshot["combat"]["hostiles"][0]["position"] = {"x": 49, "z": 47}
         self.assertEqual(first, director.combat_order_signature(snapshot))
         snapshot["combat"]["hostiles"][0]["health"] = 0.79
+        self.assertEqual(first, director.combat_order_signature(snapshot))
+        snapshot["combat"]["colonists"][0]["health"] = 0.79
         self.assertNotEqual(first, director.combat_order_signature(snapshot))
+
+    def test_combat_order_has_minimum_and_maximum_replan_intervals(self):
+        first = ("active", 1)
+        changed = ("active", 2)
+        self.assertTrue(director.combat_replan_due(first, None, 0, False))
+        self.assertFalse(director.combat_replan_due(changed, first, 2, True))
+        self.assertTrue(director.combat_replan_due(changed, first, 5, True))
+        self.assertFalse(director.combat_replan_due(first, first, 29, True))
+        self.assertTrue(director.combat_replan_due(first, first, 30, True))
+        self.assertTrue(director.combat_replan_due(changed, first, 1, True, urgent=True))
+
+    def test_preemptive_advance_is_short_hop_then_replans_on_assault(self):
+        snapshot = {"combat": {
+            "colonists": [{"id": 1, "health": 1.0, "current_job": "Wait_Combat"},
+                          {"id": 2, "health": 1.0, "current_job": "Wait_Combat"}],
+            "hostiles": [{"id": 9, "current_job": "GotoWander", "health": 1.0}],
+        }}
+        record = {
+            "decision": {"choice": "preemptive_strike"},
+            "action": {"commands": [{"endpoint": "/api/v1/combat/tactic", "body": {
+                "tactic": "preemptive_strike", "fighter_ids": [1, 2], "target_pawn_id": 9,
+            }}]},
+            "result": {"responses": [{"positioned_pawn_ids": [1, 2], "attacking_pawn_ids": []}]},
+        }
+        self.assertEqual(director.preemptive_advance_state(snapshot, record, 1)[0], "wait")
+        self.assertEqual(director.preemptive_advance_state(snapshot, record, 3)[0], "advance")
+        snapshot["combat"]["colonists"][0]["current_job"] = "Goto"
+        self.assertEqual(director.preemptive_advance_state(snapshot, record, 3)[0], "wait")
+        snapshot["combat"]["hostiles"][0]["current_job"] = "AttackMelee"
+        self.assertEqual(director.preemptive_advance_state(snapshot, record, 3)[0], "replan")
 
     def test_locked_heartbeat_replace_falls_back_without_crashing(self):
         with tempfile.TemporaryDirectory() as folder:

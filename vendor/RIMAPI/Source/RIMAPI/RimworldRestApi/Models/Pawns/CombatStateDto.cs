@@ -32,6 +32,9 @@ namespace RIMAPI.Models
         public string WeaponLabel { get; set; }
         public bool HasRangedWeapon { get; set; }
         public string CurrentJob { get; set; }
+        public int? CurrentJobTargetId { get; set; }
+        public string LordJobType { get; set; }
+        public string LordToilName { get; set; }
         public float DistanceToNearestOpponent { get; set; }
         public string Gender { get; set; }
         public int BiologicalAge { get; set; }
@@ -44,6 +47,7 @@ namespace RIMAPI.Models
         public float MarketValue { get; set; }
         public float CombatPower { get; set; }
         public float WeaponRange { get; set; }
+        public float ArmorSharp { get; set; }
         public int? CarryingPawnId { get; set; }
         public float Psyfocus { get; set; }
         public float TargetPsyfocus { get; set; }

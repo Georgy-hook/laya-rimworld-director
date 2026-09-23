@@ -1,3 +1,12 @@
+# 0.0.3 — First-run model download and raid-response fixes
+
+- The configuration assistant now downloads the required public root Laya checkpoint during setup. A missing cache is also recovered on launch; an unavailable network or incomplete download produces an explicit error. Model weights remain outside the installer and run locally after download.
+- A dedicated `download-model` command fetches only the five required root files without loading the model into GPU memory or needing RimWorld.
+- Raid staging and distant assaults no longer block ordinary colony work or keep defenders drafted all day. Laya can choose to equip capable colonists from available weapons before the enemy closes.
+- Ranged focus fire is offered only when a shooter can reach the enemy. The roster and issued order exclude out-of-range shooters; unarmed colonists can choose a trap-free retreat instead of standing idle or charging into melee.
+- Combat telemetry excludes passive distant hive occupants and exposes raid intent; short preemptive advances are reassessed when the enemy starts attacking. Wounded or reserved fighters are undrafted.
+- 104 deterministic Python tests, GUI smoke checks and a C# build with no warnings/errors. Disposable live raids verified weapon pickup, staging, fighting and stand-down; this experimental autopilot does not guarantee colony survival.
+
 # 0.0.2 — RimWorld Autopilot, hierarchical decisions and colony logistics
 
 Development release focused on correcting the decision architecture and the survival failures observed in live colonies.

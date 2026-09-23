@@ -18,6 +18,11 @@ TACTICS: dict[str, dict[str, Any]] = {
         "description": "All safe shooters attack one high-priority target, reducing enemy damage quickly instead of spreading wounds.",
         "tags": {"general", "ranged"},
     },
+    "civilian_retreat": {
+        "label": "Withdraw unarmed civilians",
+        "description": "Move mobile unarmed colonists away from the nearest hostile along a trap-free path instead of standing still or charging into melee.",
+        "tags": {"unarmed", "fallback", "defense"},
+    },
     "firing_line": {
         "label": "Safe firing line",
         "description": "Form a spaced line behind cover; adjacent shooters remain inside the short friendly-fire-safe envelope.",
@@ -164,70 +169,77 @@ def _defense_types(snapshot: dict[str, Any]) -> set[str]:
     return {str(row.get("kind") or "").lower() for row in snapshot.get("combat", {}).get("defenses", [])}
 
 
+def hostile_is_preparing(row: dict[str, Any]) -> bool:
+    job = str(row.get("current_job") or "").lower()
+    if job == "goto" or any(token in job for token in ("attack", "breach", "sap", "kidnap", "steal")):
+        return False
+    lord_toil = str(row.get("lord_toil_name") or "").lower()
+    return any(token in job for token in ("wait", "wander", "prepare", "siege")) or any(
+        token in lord_toil for token in ("stage", "siege")
+    )
+
+
 def available_tactics(snapshot: dict[str, Any]) -> dict[str, str]:
     combat = snapshot.get("combat", {})
     hostiles = [row for row in combat.get("hostiles", []) if not row.get("is_dead") and not row.get("is_downed")]
-    fighters = [row for row in combat.get("colonists", []) if not row.get("is_dead") and not row.get("is_downed") and float(row.get("health") or 0) >= 0.6]
+    fighters = [row for row in combat.get("colonists", []) if not row.get("is_dead") and not row.get("is_downed") and float(row.get("health") or 0) >= 0.72 and float(row.get("moving", 1)) >= 0.65]
     if not hostiles:
         return {"stand_down": TACTICS["stand_down"]["description"]} if any(row.get("is_drafted") for row in fighters) else {}
+    if not fighters:
+        return {}
 
     hostile_text = [_text(row) for row in hostiles]
     hostile_jobs = " ".join(hostile_text)
     defenses = _defense_types(snapshot)
-    ranged = [row for row in fighters if row.get("has_ranged_weapon")]
-    melee = [row for row in fighters if not row.get("has_ranged_weapon") or int(row.get("melee_skill") or 0) >= int(row.get("shooting_skill") or 0) + 3]
+    ranged = [row for row in fighters if row.get("has_ranged_weapon") and float(row.get("manipulation", 1)) >= 0.65 and float(row.get("sight", 1)) >= 0.65]
+    melee = [row for row in fighters if row.get("weapon_def") and not row.get("has_ranged_weapon") and int(row.get("melee_skill") or 0) >= 5 and float(row.get("moving", 1)) >= 0.8]
+    armored_melee = [row for row in melee if float(row.get("armor_sharp") or 0) >= 0.4]
     psycasts = [ability for pawn in fighters for ability in (pawn.get("psycasts") or []) if ability.get("can_cast")]
-    weapons = combat.get("available_weapons", [])
-    has_emp = any("emp" in _text(row) for row in weapons + fighters)
-    has_smoke = any("smoke" in _text(row) for row in weapons + fighters)
     has_explosives = any(any(token in text for token in EXPLOSIVE_TOKENS) for text in hostile_text)
-    has_mechs = any(any(token in text for token in MECH_TOKENS) for text in hostile_text)
     has_insects = any(any(token in text for token in INSECT_TOKENS) for text in hostile_text)
     has_kidnapper = "kidnap" in hostile_jobs or any(row.get("carrying_pawn_id") for row in hostiles)
-    staging = all(float(row.get("distance_to_nearest_opponent") or 0) > 35 for row in fighters) and not any(
-        token in hostile_jobs for token in ("attack", "breach", "sap", "kidnap", "steal")
+    staging = bool(fighters) and all(float(row.get("distance_to_nearest_opponent") or 0) > 35 for row in fighters) and all(
+        hostile_is_preparing(row) for row in hostiles
     )
 
-    names: list[str] = ["hold_cover", "focus_fire"]
+    in_range = [row for row in ranged if float(row.get("distance_to_nearest_opponent") or 9999)
+                <= float(row.get("weapon_range") or 0) + 1]
+    names: list[str] = ["hold_cover"] if ranged else []
+    if in_range:
+        names.append("focus_fire")
     if len(ranged) >= 2:
-        names += ["firing_line", "staggered_retreat"]
-    if has_explosives or len(hostiles) >= 8:
+        names.append("firing_line")
+    if len(ranged) >= 2 and (has_explosives or len(hostiles) >= 8):
         names.append("spread_out")
-    if melee:
+    if armored_melee and "door" in defenses:
         names += ["melee_block", "door_defense"]
-    if "killbox" in defenses or "trap" in defenses:
+    if "killbox" in defenses:
         names.append("killbox_hold")
     if "fallback" in defenses or "door" in defenses or "barricade" in defenses:
         names.append("fallback_line")
-    if staging and len(ranged) >= 3:
-        names += ["wide_flank", "pincer", "counter_snipe", "siege_harass"]
-    if "mortar" in defenses and staging:
-        names.append("mortar_counterbattery")
-    if any("drop" in text for text in hostile_text) or "waitmaintainposture" in hostile_jobs:
+    if staging and len(ranged) >= 3 and all(float(row.get("moving", 1)) >= 0.8 for row in ranged):
+        names += ["wide_flank", "pincer", "siege_harass"]
+        if any(float(row.get("weapon_range") or 0) >= 30 for row in ranged):
+            names.append("counter_snipe")
+    if ranged and (any("drop" in text for text in hostile_text) or "waitmaintainposture" in hostile_jobs):
         names.append("drop_pod_encircle")
-    if has_mechs:
-        names.append("cluster_poke")
-        if has_emp:
-            names.append("emp_control")
-        if has_smoke:
-            names.append("smoke_advance")
-    if has_insects:
-        names += ["infestation_choke", "kite"]
-        if "firefoam" in defenses:
-            names.append("infestation_burn")
-    if any("animal" in text or "manhunter" in text for text in hostile_text):
+    if has_insects and armored_melee and "door" in defenses:
+        names.append("infestation_choke")
+    if ranged and all(not row.get("has_ranged_weapon") for row in hostiles) and (has_insects or any("animal" in text or "manhunter" in text for text in hostile_text)):
         names.append("kite")
-    if any("gun" in text or "sniper" in text or "lancer" in text for text in hostile_text) and melee:
+    if any("gun" in text or "sniper" in text or "lancer" in text for text in hostile_text) and armored_melee:
         names.append("rush_ranged")
-    if has_kidnapper:
-        names.insert(0, "intercept_kidnapper")
-    if any(row.get("is_downed") for row in combat.get("colonists", [])):
-        names.append("covered_rescue")
+    if has_kidnapper and ranged:
+        # Focus fire already prioritizes the carrier; the old intercept
+        # positioning did not know the escape route and could move away.
+        names.insert(0, "focus_fire")
     if psycasts:
         if any(ability.get("hostile") for ability in psycasts):
             names.append("psycast_control")
         if any(not ability.get("hostile") for ability in psycasts):
             names.append("psycast_support")
+    if not names:
+        names = ["civilian_retreat"] if any(float(row.get("moving", 1)) >= 0.65 for row in fighters) else []
 
     result: dict[str, str] = {}
     for name in names:
@@ -274,4 +286,17 @@ def choose_default_target(snapshot: dict[str, Any], tactic: str) -> int | None:
         mechs = [row for row in hostiles if any(token in _text(row) for token in MECH_TOKENS)]
         if mechs:
             hostiles = mechs
-    return int(max(hostiles, key=lambda row: (float(row.get("combat_power") or 0), float(row.get("market_value") or 0), -float(row.get("health") or 1))).get("id"))
+    fighters = [row for row in snapshot.get("combat", {}).get("colonists", []) if not row.get("is_dead") and not row.get("is_downed")]
+    def distance(row: dict[str, Any]) -> float:
+        position = row.get("position") or {}
+        if not fighters or "x" not in position or "z" not in position:
+            return 0.0
+        return min(((float(position["x"]) - float((pawn.get("position") or {}).get("x", position["x"]))) ** 2
+                    + (float(position["z"]) - float((pawn.get("position") or {}).get("z", position["z"]))) ** 2) ** 0.5
+                   for pawn in fighters)
+    return int(max(hostiles, key=lambda row: (
+        bool(row.get("carrying_pawn_id")),
+        -int(distance(row) // 12),
+        float(row.get("combat_power") or 0),
+        -float(row.get("health") if row.get("health") is not None else 1),
+    )).get("id"))

@@ -6,6 +6,8 @@ using RIMAPI.Helpers;
 using RIMAPI.Models;
 using RimWorld;
 using Verse;
+using Verse.AI;
+using Verse.AI.Group;
 
 namespace RIMAPI.Services
 {
@@ -25,7 +27,8 @@ namespace RIMAPI.Services
                     .Where(p => p != null && !p.Dead)
                     .ToList();
                 var hostiles = map.mapPawns.AllPawnsSpawned
-                    .Where(p => p != null && !p.Dead && p.HostileTo(Faction.OfPlayer))
+                    .Where(p => p != null && !p.Dead && p.HostileTo(Faction.OfPlayer)
+                        && IsActionableHostile(p, colonists, map))
                     .ToList();
                 var prisoners = map.mapPawns.PrisonersOfColony
                     .Where(p => p != null && !p.Dead)
@@ -84,6 +87,24 @@ namespace RIMAPI.Services
             }
         }
 
+        private static bool IsActionableHostile(Pawn pawn, List<Pawn> colonists, Map map)
+        {
+            string job = pawn.CurJobDef?.defName?.ToLowerInvariant() ?? "";
+            bool attacking = job.Contains("attack") || job.Contains("breach") || job.Contains("sap")
+                || job.Contains("kidnap") || job.Contains("steal") || job == "goto";
+            if (attacking || pawn.carryTracker?.CarriedThing is Pawn)
+                return true;
+
+            string lordJob = pawn.GetLord()?.LordJob?.GetType().Name ?? "";
+            bool passiveHive = lordJob.Contains("DefendAndExpandHive");
+            if (passiveHive && (!colonists.Any()
+                || colonists.Min(c => c.Position.DistanceToSquared(pawn.Position)) > 45 * 45))
+                return false;
+            if (pawn.Position.Fogged(map))
+                return false;
+            return colonists.Any(c => c.CanReach(pawn, PathEndMode.Touch, Danger.Deadly));
+        }
+
         private static CombatPawnDto ToCombatPawn(Pawn pawn, bool hostile, List<Pawn> opponents)
         {
             var primary = pawn.equipment?.Primary;
@@ -122,6 +143,9 @@ namespace RIMAPI.Services
                 WeaponLabel = primary?.LabelShortCap,
                 HasRangedWeapon = primary?.def?.IsRangedWeapon ?? false,
                 CurrentJob = pawn.CurJobDef?.defName,
+                CurrentJobTargetId = pawn.CurJob?.targetA.Thing?.thingIDNumber,
+                LordJobType = pawn.GetLord()?.LordJob?.GetType().Name,
+                LordToilName = pawn.GetLord()?.CurLordToil?.GetType().Name,
                 DistanceToNearestOpponent = distance,
                 Gender = pawn.gender.ToString(),
                 BiologicalAge = pawn.ageTracker?.AgeBiologicalYears ?? 0,
@@ -134,6 +158,7 @@ namespace RIMAPI.Services
                 MarketValue = pawn.MarketValue,
                 CombatPower = pawn.kindDef?.combatPower ?? 0f,
                 WeaponRange = primary?.def?.Verbs?.FirstOrDefault()?.range ?? 0f,
+                ArmorSharp = pawn.GetStatValue(StatDefOf.ArmorRating_Sharp),
                 CarryingPawnId = pawn.carryTracker?.CarriedThing is Pawn carried ? (int?)carried.thingIDNumber : null,
                 Psyfocus = entropy?.CurrentPsyfocus ?? 0f,
                 TargetPsyfocus = entropy?.TargetPsyfocus ?? 0f,

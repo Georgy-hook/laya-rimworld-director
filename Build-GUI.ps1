@@ -42,7 +42,7 @@ try {
     & $builder -m PyInstaller @shared --uac-admin --name "RimWorld-Autopilot-Setup" (Join-Path $projectRoot "autopilot_setup.py")
     if ($LASTEXITCODE -ne 0) { throw "RimWorld Autopilot Setup build failed." }
 
-    $releaseName = "RimWorld-Autopilot-0.0.2"
+    $releaseName = "RimWorld-Autopilot-0.0.3"
     $releaseDirectory = Join-Path $distribution $releaseName
     $resolvedDistribution = [IO.Path]::GetFullPath($distribution)
     $resolvedRelease = [IO.Path]::GetFullPath($releaseDirectory)
@@ -72,7 +72,7 @@ try {
         Remove-Item -Force
     Copy-Item -LiteralPath (Join-Path $distribution "RimWorld-Autopilot.exe") -Destination $releaseDirectory -Force
     Copy-Item -LiteralPath (Join-Path $distribution "RimWorld-Autopilot-Setup.exe") -Destination $releaseDirectory -Force
-    $archive = Join-Path $distribution "rimworld-autopilot-0.0.2.zip"
+    $archive = Join-Path $distribution "rimworld-autopilot-0.0.3.zip"
     Compress-Archive -Path (Join-Path $releaseDirectory "*") -DestinationPath $archive -CompressionLevel Optimal -Force
 
     $innoCompiler = $innoCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1

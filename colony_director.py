@@ -1155,6 +1155,7 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
     details: dict[str, Any] = {}
     one_time: list[str] = []
     item_counts = dev.get("item_counts", {})
+    can_work = lambda work: bridge.choose_worker(snapshot.get("colonists", []), work) is not None
     rolled_back_orders = reconcile_issued_timeline(map_state, tick)
     if rolled_back_orders:
         details["discarded_future_orders"] = rolled_back_orders
@@ -1246,11 +1247,11 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
             dev["hunt_options"] = emergency_hunt_options[:20]
             dev["fighter_context"] = details["fighter_context"]
             emergency_actions.append("designate_safe_hunting")
-        if wild_food_groups and not issued_recently(map_state, "priority:PlantCutting", tick, retry_ticks=15000):
+        if wild_food_groups and can_work("PlantCutting") and not issued_recently(map_state, "priority:PlantCutting", tick, retry_ticks=15000):
             emergency_actions.append("prioritize_plant_cutting")
-        if emergency_hunt_options and not issued_recently(map_state, "priority:Hunting", tick, retry_ticks=15000):
+        if emergency_hunt_options and can_work("Hunting") and not issued_recently(map_state, "priority:Hunting", tick, retry_ticks=15000):
             emergency_actions.append("prioritize_hunting")
-        if int(resources.get("raw_food") or 0) > 0 and not issued_recently(map_state, "priority:Cooking", tick, retry_ticks=15000):
+        if int(resources.get("raw_food") or 0) > 0 and can_work("Cooking") and not issued_recently(map_state, "priority:Cooking", tick, retry_ticks=15000):
             emergency_actions.append("prioritize_cooking")
         details["food_emergency_context"] = {
             "food": int(resources.get("food") or 0),
@@ -1290,7 +1291,7 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
         corpse_actions.append("build_crematorium")
     if any(corpse_rows(snapshot, "CorpsesAnimal")) and not animal_dump_exists and "animal_corpse_dump" not in issued:
         corpse_actions.append("create_animal_corpse_dump")
-    if all_corpses and (human_dump_exists or animal_dump_exists or counts.get("Grave", 0) > 0) and not issued_recently(map_state, "priority:Burial", tick, retry_ticks=30000):
+    if all_corpses and can_work("Hauling") and (human_dump_exists or animal_dump_exists or counts.get("Grave", 0) > 0) and not issued_recently(map_state, "priority:Burial", tick, retry_ticks=30000):
         corpse_actions.append("prioritize_burial")
     if corpse_actions:
         details["corpse_context"] = {
@@ -2034,9 +2035,9 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
         for c in snapshot["colonists"]
     )
     if medical_emergency:
-        if not issued_recently(map_state, "priority:BasicWorker", tick, retry_ticks=30000):
+        if can_work("BasicWorker") and not issued_recently(map_state, "priority:BasicWorker", tick, retry_ticks=30000):
             maintenance.append("prioritize_rescue")
-        if not issued_recently(map_state, "priority:Doctor", tick, retry_ticks=30000):
+        if can_work("Doctor") and not issued_recently(map_state, "priority:Doctor", tick, retry_ticks=30000):
             maintenance.append("prioritize_doctor")
         # A downed or critically injured colonist is a hard feasibility boundary:
         # Laya still chooses the response, but routine work is not presented as an
@@ -2046,26 +2047,26 @@ def candidate_actions(client: bridge.RimApiClient, snapshot: dict[str, Any], map
     if counts.get("Bed", 0) + counts.get("SleepingSpot", 0) < len(snapshot["colonists"]) or any(
         counts.get(name, 0) == 0 for name in ("FueledStove", "SimpleResearchBench")
     ):
-        if not issued_recently(map_state, "priority:Construction", tick, retry_ticks=60000):
+        if can_work("Construction") and not issued_recently(map_state, "priority:Construction", tick, retry_ticks=60000):
             maintenance.append("prioritize_construction")
     if current.lower() != "none":
-        if survival_stable and not issued_recently(map_state, "priority:Research", tick, retry_ticks=60000):
+        if survival_stable and can_work("Research") and not issued_recently(map_state, "priority:Research", tick, retry_ticks=60000):
             maintenance.append("prioritize_research")
     if meals < max(4, len(snapshot["colonists"]) * 2):
-        if not issued_recently(map_state, "priority:Cooking", tick, retry_ticks=60000):
+        if can_work("Cooking") and not issued_recently(map_state, "priority:Cooking", tick, retry_ticks=60000):
             maintenance.append("prioritize_cooking")
-    if not issued_recently(map_state, "priority:Growing", tick, retry_ticks=60000):
+    if can_work("Growing") and not issued_recently(map_state, "priority:Growing", tick, retry_ticks=60000):
         maintenance.append("prioritize_growing")
-    if not issued_recently(map_state, "priority:Hauling", tick, retry_ticks=60000):
+    if can_work("Hauling") and not issued_recently(map_state, "priority:Hauling", tick, retry_ticks=60000):
         maintenance.append("prioritize_hauling")
-    if not issued_recently(map_state, "priority:PlantCutting", tick, retry_ticks=60000):
+    if can_work("PlantCutting") and not issued_recently(map_state, "priority:PlantCutting", tick, retry_ticks=60000):
         maintenance.append("prioritize_plant_cutting")
-    if not issued_recently(map_state, "priority:Cleaning", tick, retry_ticks=60000):
+    if can_work("Cleaning") and not issued_recently(map_state, "priority:Cleaning", tick, retry_ticks=60000):
         maintenance.append("prioritize_cleaning")
     if snapshot["map"].get("animals", 0) > 0:
-        if not issued_recently(map_state, "priority:Hunting", tick, retry_ticks=60000):
+        if can_work("Hunting") and not issued_recently(map_state, "priority:Hunting", tick, retry_ticks=60000):
             maintenance.append("prioritize_hunting")
-        if not issued_recently(map_state, "priority:Handling", tick, retry_ticks=60000):
+        if can_work("Handling") and not issued_recently(map_state, "priority:Handling", tick, retry_ticks=60000):
             maintenance.append("prioritize_handling")
         if details.get("hunt_options") and not issued_recently(map_state, "safe_hunting", tick, retry_ticks=60000):
             maintenance.append("designate_safe_hunting")
@@ -2354,7 +2355,8 @@ def worker_criteria(snapshot: dict[str, Any], skill_name: str) -> dict[str, str]
         if pawn.get("downed") or float(pawn.get("health") or 0) < 0.65:
             continue
         work_name = "Hauling" if skill_name == "Hauling" else skill_name
-        if (pawn.get("work_priorities", {}).get(work_name) or {}).get("disabled"):
+        priority = (pawn.get("work_priorities") or {}).get(work_name)
+        if not isinstance(priority, dict) or priority.get("disabled"):
             continue
         skill = int((pawn.get("skills", {}).get(skill_name) or {}).get("level") or 0)
         traits = ", ".join(str(t.get("label") or t.get("name")) for t in pawn.get("traits", [])) or "no notable traits"
@@ -4600,30 +4602,34 @@ def combat_order_signature(snapshot: dict[str, Any]) -> tuple[Any, ...]:
 
     def hostile_intent(row: dict[str, Any]) -> str:
         job = str(row.get("current_job") or "").lower()
+        if bridge.combat_planner.hostile_is_preparing(row):
+            return "staging"
         for intent, markers in (
             ("kidnap", ("kidnap", "capture")),
             ("flee", ("flee", "exitmap")),
             ("breach", ("breach", "sap")),
             ("steal", ("steal",)),
-            ("attack", ("attack", "goto", "assault")),
-            ("staging", ("wait", "prepare", "siege", "mortar")),
+            ("attack", ("attack", "assault", "goto")),
         ):
             if any(marker in job for marker in markers):
                 return intent
         return "unknown"
 
-    healthy = [
+    living = [
         row for row in colonists
         if row.get("id") is not None
         and not row.get("is_dead")
         and not row.get("is_downed")
-        and bridge.first_number(row.get("health"), 0.0) >= 0.6
     ]
     hostile_intents = tuple(sorted(hostile_intent(row) for row in hostiles))
-    staging = bool(healthy) and bool(hostiles) and all(
-        bridge.first_number(row.get("distance_to_nearest_opponent"), 9999) > 45
-        for row in healthy
-    ) and not any(intent in {"attack", "breach", "kidnap", "steal"} for intent in hostile_intents)
+    actively_fighting = any(row.get("is_drafted") and str(row.get("current_job") or "").lower() in {
+        "attackstatic", "attackmelee", "goto",
+    } for row in living)
+    staging_distance = 70 if actively_fighting else 35
+    staging = bool(living) and bool(hostiles) and all(
+        bridge.first_number(row.get("distance_to_nearest_opponent"), 9999) > staging_distance
+        for row in living
+    ) and all(intent == "staging" for intent in hostile_intents)
     fighter_state = tuple(sorted(
         (
             int(row["id"]), bool(row.get("is_drafted")), bool(row.get("is_downed")),
@@ -4635,12 +4641,56 @@ def combat_order_signature(snapshot: dict[str, Any]) -> tuple[Any, ...]:
     hostile_state = tuple(sorted(
         (
             int(row["id"]), bool(row.get("is_downed")),
-            int(bridge.first_number(row.get("health"), 0.0) * 10),
             hostile_intent(row), int(row.get("carrying_pawn_id") or 0),
+            (0 if bridge.first_number(row.get("distance_to_nearest_opponent"), 9999) < 6
+             else 1 if bridge.first_number(row.get("distance_to_nearest_opponent"), 9999) < 15
+             else 2 if bridge.first_number(row.get("distance_to_nearest_opponent"), 9999) < 35
+             else 3),
         )
         for row in hostiles if row.get("id") is not None
     ))
     return ("staging" if staging else "active", fighter_state, hostile_state)
+
+
+def combat_replan_due(signature: tuple[Any, ...], previous: tuple[Any, ...] | None,
+                      elapsed: float, has_record: bool, urgent: bool = False) -> bool:
+    """Keep orders long enough to execute, but never leave stale tactics indefinitely."""
+    return not has_record or (urgent and signature != previous) or (signature != previous and elapsed >= 5.0) or elapsed >= 30.0
+
+
+def preemptive_advance_state(snapshot: dict[str, Any], record: dict[str, Any] | None,
+                             elapsed: float) -> tuple[str, dict[str, Any] | None]:
+    """Continue Laya's strike in short map-validated hops, or reassess new danger."""
+    if not record or (record.get("decision") or {}).get("choice") != "preemptive_strike":
+        return "none", None
+    commands = (record.get("action") or {}).get("commands") or []
+    command = next((row for row in commands if row.get("endpoint") == "/api/v1/combat/tactic"), None)
+    if not command or (command.get("body") or {}).get("tactic") != "preemptive_strike":
+        return "none", None
+    body = command["body"]
+    hostile = next((row for row in snapshot.get("combat", {}).get("hostiles", [])
+                    if row.get("id") == body.get("target_pawn_id") and not row.get("is_dead") and not row.get("is_downed")), None)
+    live_hostiles = [row for row in snapshot.get("combat", {}).get("hostiles", [])
+                     if not row.get("is_dead") and not row.get("is_downed")]
+    initial_ids = {row.get("id") for row in ((record.get("snapshot") or {}).get("combat") or {}).get("hostiles", [])
+                   if not row.get("is_dead") and not row.get("is_downed")}
+    if (hostile is None or any(not bridge.combat_planner.hostile_is_preparing(row) for row in live_hostiles)
+            or (initial_ids and {row.get("id") for row in live_hostiles} != initial_ids)):
+        return "replan", None
+    fighters = [row for row in snapshot.get("combat", {}).get("colonists", [])
+                if row.get("id") in body.get("fighter_ids", []) and not row.get("is_dead") and not row.get("is_downed")]
+    if len(fighters) < 2 or any(bridge.first_number(row.get("health")) < 0.72 for row in fighters):
+        return "replan", None
+    responses = (record.get("result") or {}).get("responses") or []
+    tactic_index = commands.index(command)
+    tactic_response = responses[tactic_index] if len(responses) > tactic_index else {}
+    if tactic_response and not (tactic_response.get("positioned_pawn_ids") or tactic_response.get("attacking_pawn_ids")):
+        return "wait", None
+    if elapsed < 2.0 or any(str(row.get("current_job") or "").lower() == "goto" for row in fighters):
+        return "wait", None
+    if all(str(row.get("current_job") or "").lower() == "attackstatic" for row in fighters):
+        return "wait", None
+    return "advance", body
 
 
 def main() -> int:
@@ -4664,6 +4714,8 @@ def main() -> int:
     last_wait_message = 0.0
     last_combat_signature: tuple[Any, ...] | None = None
     last_combat_record: dict[str, Any] | None = None
+    last_combat_order_time = 0.0
+    last_combat_step_time = 0.0
     next_colony_cycle = 0.0
     next_downed_cycle = 0.0
     retry_not_before = 0.0
@@ -4686,8 +4738,15 @@ def main() -> int:
                     time.sleep(max(0.0, min(2.0, remaining_retry) - elapsed))
                     continue
                 if snapshot["map"]["enemies"] > 0 or any(c.get("is_drafted") for c in snapshot["combat"]["colonists"]):
-                    next_colony_cycle = 0.0
                     living_hostiles = [h for h in snapshot["combat"]["hostiles"] if not h.get("is_dead")]
+                    safe_work_allowed = bool(living_hostiles) and all(
+                        bridge.first_number(hostile.get("distance_to_nearest_opponent"), 0) > max(
+                            55, bridge.first_number(hostile.get("weapon_range")) + 15
+                        )
+                        for hostile in living_hostiles
+                    ) and not any(pawn.get("is_drafted") for pawn in snapshot["combat"]["colonists"])
+                    if not safe_work_allowed:
+                        next_colony_cycle = 0.0
                     if living_hostiles and all(h.get("is_downed") for h in living_hostiles):
                         now = time.monotonic()
                         if now >= next_downed_cycle:
@@ -4702,18 +4761,44 @@ def main() -> int:
                         continue
                     next_downed_cycle = 0.0
                     signature = combat_order_signature(snapshot)
-                    if signature == last_combat_signature and last_combat_record is not None:
+                    now = time.monotonic()
+                    advance_state, advance_body = preemptive_advance_state(snapshot, last_combat_record, now - last_combat_step_time)
+                    urgent = advance_state == "replan" or any(
+                        bridge.first_number(row.get("distance_to_nearest_opponent"), 9999) < 15
+                        for row in living_hostiles
+                    )
+                    if advance_state in {"advance", "wait"} and now - last_combat_order_time >= 60:
+                        advance_state = "replan"
+                    if advance_state == "advance" and advance_body is not None:
+                        step_result = client.post("/api/v1/combat/tactic", body=advance_body)
+                        last_combat_step_time = now
+                        if not step_result.get("positioned_pawn_ids") and not step_result.get("attacking_pawn_ids"):
+                            last_combat_signature = None
+                        if snapshot["game"].get("is_paused"):
+                            client.post("/api/v1/game/speed", query={"speed": 1})
                         publish_combat_overlay(client, last_combat_record, repeated=True)
-                        print(f"[{bridge.utc_now()}] combat order still active; no duplicate command", flush=True)
+                    elif advance_state == "wait" or (advance_state != "replan" and not combat_replan_due(signature, last_combat_signature, now - last_combat_order_time, last_combat_record is not None, urgent)):
+                        if snapshot["game"].get("is_paused") and living_hostiles:
+                            client.post("/api/v1/game/speed", query={"speed": 1})
+                        publish_combat_overlay(client, last_combat_record, repeated=True)
                     else:
                         record = bridge.run_cycle(client, agent, apply=True, confidence=0.0, log_path=args.log)
                         publish_combat_overlay(client, record)
                         last_combat_signature = signature
                         last_combat_record = record
+                        last_combat_order_time = now
+                        last_combat_step_time = now
                         print(f"[{record['timestamp']}] combat: {record['action']['description']}", flush=True)
+                    if (safe_work_allowed and now >= next_colony_cycle and last_combat_record
+                            and (last_combat_record.get("decision") or {}).get("choice") in {"prepare_undrafted", "hold_and_observe"}):
+                        colony_record = run_development_cycle(client, agent, state, args.state, args.log)
+                        next_colony_cycle = now + args.interval
+                        print(f"[{colony_record['timestamp']}] staging work: {colony_record['decision']['choice']} | {colony_record['result']}", flush=True)
                 else:
                     last_combat_signature = None
                     last_combat_record = None
+                    last_combat_order_time = 0.0
+                    last_combat_step_time = 0.0
                     now = time.monotonic()
                     rescue_record = run_rescue_site_cycle(client, state, args.state, args.log, snapshot)
                     away_site = bool(snapshot.get("map", {}).get("is_temp_incident_map"))

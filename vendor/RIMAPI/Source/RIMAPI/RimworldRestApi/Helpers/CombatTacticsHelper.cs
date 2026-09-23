@@ -6,6 +6,7 @@ using RIMAPI.Models;
 using RimWorld;
 using Verse;
 using Verse.AI;
+using Verse.AI.Group;
 
 namespace RIMAPI.Helpers
 {
@@ -17,7 +18,7 @@ namespace RIMAPI.Helpers
             "melee_block", "door_defense", "killbox_hold", "fallback_line", "wide_flank",
             "pincer", "counter_snipe", "smoke_advance", "siege_harass", "drop_pod_encircle",
             "infestation_choke", "cluster_poke", "intercept_kidnapper", "covered_rescue",
-            "fire_retreat"
+            "fire_retreat", "civilian_retreat"
         };
 
         public static ApiResult<CombatTacticResponseDto> Apply(CombatTacticRequestDto request)
@@ -78,13 +79,95 @@ namespace RIMAPI.Helpers
                         result.Notes.AddRange(cast.Errors);
                 }
 
+                // A support/control cast is the complete order for this cycle.  The
+                // caster must not immediately discard it for an AttackMelee job.
+                if (tactic == "psycast_control" || tactic == "psycast_support")
+                    return ApiResult<CombatTacticResponseDto>.Ok(result);
+
                 if (target == null)
                 {
                     result.Notes.Add("No living hostile target remains; fighters were drafted but no attack was issued.");
                     return ApiResult<CombatTacticResponseDto>.Ok(result);
                 }
 
-                Building defense = FindDefense(map, request.DefenseBuildingId, tactic, target.Position);
+                if (tactic == "preemptive_strike")
+                {
+                    foreach (Pawn pawn in fighters)
+                    {
+                        float range = pawn.equipment?.Primary?.def?.Verbs?.FirstOrDefault()?.range ?? 0f;
+                        if (!IsRanged(pawn) || range < 25f)
+                        {
+                            result.Notes.Add($"{pawn.LabelShortCap} has no suitable long-range weapon.");
+                            pawn.drafter.Drafted = false;
+                            result.DraftedPawnIds.Remove(pawn.thingIDNumber);
+                            continue;
+                        }
+                        float dx = pawn.Position.x - target.Position.x;
+                        float dz = pawn.Position.z - target.Position.z;
+                        float distance = (float)Math.Sqrt(dx * dx + dz * dz);
+                        if (distance <= range - 2f)
+                        {
+                            Job attack = JobMaker.MakeJob(JobDefOf.AttackStatic, target);
+                            attack.playerForced = true;
+                            if (pawn.jobs.TryTakeOrderedJob(attack))
+                                result.AttackingPawnIds.Add(pawn.thingIDNumber);
+                            else
+                            {
+                                result.Notes.Add($"Could not queue a shot for {pawn.LabelShortCap}; undrafted.");
+                                pawn.drafter.Drafted = false;
+                                result.DraftedPawnIds.Remove(pawn.thingIDNumber);
+                            }
+                            continue;
+                        }
+                        string targetJob = target.CurJobDef?.defName ?? "";
+                        string targetLordToil = target.GetLord()?.CurLordToil?.GetType().Name ?? "";
+                        bool preparing = targetJob.IndexOf("wait", StringComparison.OrdinalIgnoreCase) >= 0
+                            || targetJob.IndexOf("wander", StringComparison.OrdinalIgnoreCase) >= 0
+                            || targetLordToil.IndexOf("stage", StringComparison.OrdinalIgnoreCase) >= 0
+                            || targetLordToil.IndexOf("siege", StringComparison.OrdinalIgnoreCase) >= 0;
+                        if (targetJob.Equals("Goto", StringComparison.OrdinalIgnoreCase)
+                            || targetJob.IndexOf("attack", StringComparison.OrdinalIgnoreCase) >= 0
+                            || targetJob.IndexOf("breach", StringComparison.OrdinalIgnoreCase) >= 0
+                            || targetJob.IndexOf("kidnap", StringComparison.OrdinalIgnoreCase) >= 0)
+                            preparing = false;
+                        if (!preparing)
+                        {
+                            pawn.jobs.StopAll();
+                            result.Notes.Add($"{target.LabelShortCap} is advancing; {pawn.LabelShortCap} holds position instead of chasing.");
+                            continue;
+                        }
+                        // A short waypoint is intentionally re-evaluated against live
+                        // enemy movement; a full-map Goto can run into a new assault.
+                        float step = Math.Min(8f, Math.Max(0f, distance - (range - 4f)));
+                        float scale = step / Math.Max(distance, 1f);
+                        IntVec3 desired = new IntVec3(
+                            pawn.Position.x - (int)Math.Round(dx * scale), 0,
+                            pawn.Position.z - (int)Math.Round(dz * scale));
+                        IntVec3 safe;
+                        if (TryFindTrapFreeCell(pawn, desired, target.Position, tactic, out safe, Math.Max(15f, range - 7f)))
+                        {
+                            Job move = JobMaker.MakeJob(JobDefOf.Goto, safe);
+                            move.playerForced = true;
+                            if (pawn.jobs.TryTakeOrderedJob(move))
+                                result.PositionedPawnIds.Add(pawn.thingIDNumber);
+                            else
+                            {
+                                result.Notes.Add($"Could not queue advance for {pawn.LabelShortCap}; undrafted.");
+                                pawn.drafter.Drafted = false;
+                                result.DraftedPawnIds.Remove(pawn.thingIDNumber);
+                            }
+                        }
+                        else
+                        {
+                            result.Notes.Add($"No trap-free route to firing range for {pawn.LabelShortCap}; undrafted.");
+                            pawn.drafter.Drafted = false;
+                            result.DraftedPawnIds.Remove(pawn.thingIDNumber);
+                        }
+                    }
+                    return ApiResult<CombatTacticResponseDto>.Ok(result);
+                }
+
+                Building defense = FindDefense(map, request.DefenseBuildingId, tactic, target.Position, fighters);
                 if (PositioningTactics.Contains(tactic))
                 {
                     List<Pawn> ordered = fighters
@@ -105,9 +188,14 @@ namespace RIMAPI.Helpers
                         else
                         {
                             result.Notes.Add($"No trap-free reachable position was found for {pawn.LabelShortCap}; current position retained.");
+                            if (tactic == "civilian_retreat")
+                            {
+                                pawn.drafter.Drafted = false;
+                                result.DraftedPawnIds.Remove(pawn.thingIDNumber);
+                            }
                         }
                     }
-                    if (result.PositionedPawnIds.Count > 0)
+                    if (result.PositionedPawnIds.Count > 0 || tactic == "civilian_retreat")
                         return ApiResult<CombatTacticResponseDto>.Ok(result);
                 }
 
@@ -135,7 +223,7 @@ namespace RIMAPI.Helpers
             return pawn?.equipment?.Primary?.def?.IsRangedWeapon ?? false;
         }
 
-        private static Building FindDefense(Map map, int? requestedId, string tactic, IntVec3 target)
+        private static Building FindDefense(Map map, int? requestedId, string tactic, IntVec3 target, List<Pawn> fighters)
         {
             IEnumerable<Building> candidates = map.listerBuildings.allBuildingsColonist
                 .Where(b => b != null && !b.Destroyed && !(b is Building_Trap));
@@ -153,7 +241,9 @@ namespace RIMAPI.Helpers
                         : new[] { "barricade", "sandbag", "wall", "shelf", "turret" };
             return candidates
                 .Where(b => preferred.Any(token => (b.def.defName + " " + b.Label).ToLowerInvariant().Contains(token)))
-                .OrderBy(b => b.Position.DistanceToSquared(target))
+                .Where(b => fighters.Any(f => f.Position.DistanceToSquared(b.Position) <= 400))
+                .Where(b => b.Position.DistanceToSquared(target) >= 36)
+                .OrderBy(b => fighters.Min(f => f.Position.DistanceToSquared(b.Position)) + b.Position.DistanceToSquared(target) / 4)
                 .FirstOrDefault();
         }
 
@@ -168,7 +258,7 @@ namespace RIMAPI.Helpers
             int spacing = tactic == "spread_out" || tactic == "drop_pod_encircle" ? 3 : 1;
             int centered = index - count / 2;
 
-            if (tactic == "kite" || tactic == "staggered_retreat" || tactic == "fire_retreat")
+            if (tactic == "kite" || tactic == "staggered_retreat" || tactic == "fire_retreat" || tactic == "civilian_retreat")
                 return new IntVec3(pawn.Position.x + dx * 8 + sideX * centered, 0, pawn.Position.z + dz * 8 + sideZ * centered);
             if (tactic == "wide_flank" || tactic == "pincer")
             {
@@ -185,7 +275,8 @@ namespace RIMAPI.Helpers
             return new IntVec3(baseCell.x + dx * depth + sideX * centered * spacing, 0, baseCell.z + dz * depth + sideZ * centered * spacing);
         }
 
-        private static bool TryFindTrapFreeCell(Pawn pawn, IntVec3 desired, IntVec3 hostile, string tactic, out IntVec3 result)
+        private static bool TryFindTrapFreeCell(Pawn pawn, IntVec3 desired, IntVec3 hostile, string tactic, out IntVec3 result,
+            float minimumHostileDistance = 6f)
         {
             Map map = pawn.Map;
             bool melee = tactic == "melee_block" || tactic == "door_defense" || tactic == "rush_ranged" || tactic == "infestation_choke";
@@ -196,7 +287,7 @@ namespace RIMAPI.Helpers
                 .OrderBy(cell => cell.DistanceToSquared(desired));
             foreach (IntVec3 cell in candidates)
             {
-                if (!melee && cell.DistanceToSquared(hostile) < 36)
+                if (!melee && cell.DistanceToSquared(hostile) < minimumHostileDistance * minimumHostileDistance)
                     continue;
                 PawnPath path = map.pathFinder.FindPathNow(pawn.Position, cell, pawn, null, PathEndMode.OnCell);
                 bool valid = path.Found && path.NodesReversed.All(node => !HasFriendlyTrap(node, map));

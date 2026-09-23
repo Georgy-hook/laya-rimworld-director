@@ -1,6 +1,6 @@
 # Decision architecture
 
-Version 0.0.2 follows the way the Laya/Jev ecosystem is used in public examples: deterministic application code projects state and defines typed alternatives; the model ranks a bounded choice; application code validates and reduces the answer into an effect.
+Version 0.0.3 follows the way the Laya/Jev ecosystem is used in public examples: deterministic application code projects state and defines typed alternatives; the model ranks a bounded choice; application code validates and reduces the answer into an effect.
 
 References reviewed before this redesign:
 

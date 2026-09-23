@@ -1,5 +1,5 @@
 #define AppName "RimWorld Autopilot"
-#define AppVersion "0.0.2"
+#define AppVersion "0.0.3"
 #define AppExeName "RimWorld-Autopilot.exe"
 
 [Setup]
@@ -65,7 +65,7 @@ Type: files; Name: "{app}\RimWorld-Autopilot-Setup.exe"
 Type: files; Name: "{app}\Laya-Setup.exe"
 
 [Files]
-Source: "..\dist\RimWorld-Autopilot-0.0.2\*"; DestDir: "{app}"; Excludes: "RimWorld-Autopilot-Setup.exe,rimworld-autopilot.json,autopilot-preferences.json,laya-control.json,laya-preferences.json"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\RimWorld-Autopilot-0.0.3\*"; DestDir: "{app}"; Excludes: "RimWorld-Autopilot-Setup.exe,rimworld-autopilot.json,autopilot-preferences.json,laya-control.json,laya-preferences.json"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\dist\RimWorld-Autopilot-Setup.exe"; DestDir: "{tmp}"; Flags: ignoreversion deleteafterinstall
 
 [Icons]

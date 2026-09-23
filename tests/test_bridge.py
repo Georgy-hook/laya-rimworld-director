@@ -1,7 +1,9 @@
 import importlib.util
 import pathlib
 import sys
+import types
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = pathlib.Path(__file__).parents[1] / "rimworld_laya.py"
@@ -49,6 +51,43 @@ class RosterAgent:
 
 
 class BridgeTests(unittest.TestCase):
+    def test_download_model_command_prefetches_without_loading_weights_or_game(self):
+        with mock.patch.object(sys, "argv", ["rimworld_laya.py", "download-model"]):
+            with mock.patch.object(bridge, "resolve_model_source", return_value="cached") as prefetch:
+                with mock.patch.object(bridge, "load_agent", side_effect=AssertionError("should not load")):
+                    with mock.patch.object(bridge, "RimApiClient", side_effect=AssertionError("should not need game")):
+                        self.assertEqual(bridge.main(), 0)
+        prefetch.assert_called_once_with(bridge.DEFAULT_MODEL)
+
+    def test_first_run_downloads_root_laya_model_when_cache_is_empty(self):
+        calls = []
+        inner = object()
+        def download(name, **kwargs):
+            calls.append((name, kwargs))
+            if kwargs.get("local_files_only"):
+                raise OSError("cache empty")
+            return "downloaded-root-model"
+        fake_hub = types.SimpleNamespace(snapshot_download=download)
+        fake_laya = types.SimpleNamespace(load=lambda path, device: (path, device, inner))
+        with mock.patch.dict(sys.modules, {"huggingface_hub": fake_hub, "laya": fake_laya}):
+            with mock.patch.object(pathlib.Path, "is_file", return_value=True):
+                agent = bridge.load_agent(bridge.DEFAULT_MODEL, "cpu")
+        self.assertEqual(agent.inner, ("downloaded-root-model", "cpu", inner))
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(calls[0][1]["local_files_only"])
+        self.assertNotIn("local_files_only", calls[1][1])
+        self.assertEqual(calls[1][1]["allow_patterns"], ["model.safetensors", "rl_agent_config.json", "encoder/*", "tokenizer/*"])
+
+    def test_first_run_download_failure_is_actionable(self):
+        def download(name, **kwargs):
+            raise OSError("offline")
+        with mock.patch.dict(sys.modules, {
+            "huggingface_hub": types.SimpleNamespace(snapshot_download=download),
+            "laya": types.SimpleNamespace(load=lambda *args, **kwargs: None),
+        }):
+            with self.assertRaisesRegex(RuntimeError, "Internet connection"):
+                bridge.load_agent(bridge.DEFAULT_MODEL, "cpu")
+
     def test_single_option_is_resolved_without_calling_laya(self):
         class RecordingAgent:
             def __init__(self):
@@ -136,14 +175,14 @@ class BridgeTests(unittest.TestCase):
             "colonists": [{
                 "id": 10, "name": "Ada", "health": 1.0, "is_dead": False,
                 "is_downed": False, "is_drafted": True, "has_ranged_weapon": True,
-                "distance_to_nearest_opponent": 90, "current_job": "Wait_Combat",
+                "distance_to_nearest_opponent": 90, "weapon_range": 30, "current_job": "Wait_Combat",
             }, {
                 "id": 11, "name": "Bo", "health": 1.0, "is_dead": False,
                 "is_downed": False, "is_drafted": False, "has_ranged_weapon": True,
-                "distance_to_nearest_opponent": 92, "current_job": "Wait",
+                "distance_to_nearest_opponent": 92, "weapon_range": 30, "current_job": "Wait",
             }],
             "hostiles": [
-                {"id": 99, "current_job": "Wait_Combat"},
+                {"id": 99, "current_job": "GotoWander"},
                 {"id": 100, "current_job": "Wait_Wander"},
             ],
             "available_weapons": [],
@@ -153,11 +192,39 @@ class BridgeTests(unittest.TestCase):
         action = bridge.plan_action(snapshot, {"choice": "prepare_undrafted"})
         self.assertEqual(action["commands"][0]["body"], {"pawn_id": 10, "is_drafted": False})
 
+    def test_preemptive_strike_does_not_reset_same_attack_order(self):
+        snapshot = self.snapshot()
+        snapshot["game"]["is_paused"] = False
+        snapshot["map"]["enemies"] = 1
+        snapshot["combat"] = {
+            "available": True,
+            "colonists": [
+                {"id": 10, "name": "Ada", "health": 1.0, "has_ranged_weapon": True,
+                 "weapon_range": 36, "moving": 1.0, "is_drafted": True,
+                 "current_job": "AttackStatic", "current_job_target_id": 99,
+                 "shooting_skill": 10, "distance_to_nearest_opponent": 70, "position": {"x": 10, "z": 10}},
+                {"id": 11, "name": "Bo", "health": 1.0, "has_ranged_weapon": True,
+                 "weapon_range": 26, "moving": 1.0, "is_drafted": True,
+                 "current_job": "AttackStatic", "current_job_target_id": 99,
+                 "shooting_skill": 8, "distance_to_nearest_opponent": 72, "position": {"x": 9, "z": 10}},
+            ],
+            "hostiles": [{"id": 99, "name": "Raider", "health": 1.0, "position": {"x": 80, "z": 10}}],
+        }
+        self.assertEqual(bridge.plan_action(snapshot, {"choice": "preemptive_strike"})["kind"], "noop")
+
     def test_work_priority_is_whitelisted(self):
         decision = bridge.decide(FakeAgent(), self.snapshot(), 0.6)
         action = bridge.plan_action(self.snapshot(), decision)
         self.assertEqual(action["kind"], "work_priority")
         self.assertEqual(action["body"], {"id": 10, "work": "Cooking", "priority": 1})
+
+    def test_missing_or_disabled_work_type_excludes_pawn(self):
+        pawn = self.snapshot()["colonists"][0]
+        self.assertIsNone(bridge.choose_worker([pawn], "Cleaning"))
+        pawn["work_priorities"]["Cleaning"] = {"priority": 3, "disabled": True}
+        self.assertIsNone(bridge.choose_worker([pawn], "Cleaning"))
+        pawn["work_priorities"]["Cleaning"]["disabled"] = False
+        self.assertEqual(bridge.choose_worker([pawn], "Cleaning")["id"], pawn["id"])
 
     def test_laya_combat_choice_targets_real_hostile(self):
         snapshot = self.snapshot()
