@@ -2,7 +2,7 @@
 
 > Experimental autonomous colony management for RimWorld 1.6, powered by the local open-weight Laya decision model.
 
-Version **0.0.3** · Windows · Python 3.10+ · RimWorld 1.6 · GPL-3.0
+Version **0.0.3** · Windows · Python 3.10–3.12 · RimWorld 1.6 · GPL-3.0
 
 RimWorld Autopilot reads a colony through a modified local RIMAPI mod, gives the Laya model a bounded set of real and currently feasible choices, and converts the selected choice into ordinary RimWorld work priorities, designations, bills, blueprints, research, caravans and combat orders.
 
@@ -57,7 +57,7 @@ Prerequisites:
 
 1. RimWorld 1.6 on Windows.
 2. Harmony enabled before RIMAPI in the RimWorld mod list.
-3. Python 3.10 or newer (3.12 tested).
+3. Python 3.10–3.12 (3.12 tested).
 4. An NVIDIA GPU is recommended; CPU mode is supported but slower.
 5. At least roughly 1 GB free for model weights and additional space for PyTorch.
 
