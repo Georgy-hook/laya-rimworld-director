@@ -1,3 +1,4 @@
+import copy
 import importlib.util
 import json
 import pathlib
@@ -31,6 +32,8 @@ class DirectorTests(unittest.TestCase):
             self.calls.append(questions)
             answers = {}
             for question_id, question in questions.items():
+                if question.get("type") == "choice":
+                    assert len(question["criteria"]) >= 2, f"Fake model received one-option question {question_id}"
                 requested = next(self.choices)
                 self.assert_choice(requested, question["criteria"])
                 answers[question_id] = {
@@ -304,6 +307,23 @@ class DirectorTests(unittest.TestCase):
         snapshot["combat"]["hostiles"][0]["current_job"] = "AttackMelee"
         self.assertEqual(director.preemptive_advance_state(snapshot, record, 3)[0], "replan")
 
+    def test_laya_can_resume_colony_decisions_during_raid_staging(self):
+        snapshot = {"combat": {
+            "colonists": [{"id": 1, "is_drafted": False}],
+            "hostiles": [{"id": 9, "current_job": "Wait_Wander", "is_dead": False, "is_downed": False,
+                          "distance_to_nearest_opponent": 80}],
+        }, "map": {"enemies": 1, "resources": {}}, "development": {}, "colonists": [], "animals": []}
+        prepared = {"decision": {"choice": "prepare_undrafted"}}
+        self.assertTrue(director.staging_development_allowed(snapshot, prepared))
+        context = director.model_decision_context(snapshot)
+        self.assertEqual(context["threat_state"], {"phase": "preparing", "nearest": 80})
+        snapshot["combat"]["colonists"][0]["is_drafted"] = True
+        self.assertFalse(director.staging_development_allowed(snapshot, prepared))
+        snapshot["combat"]["colonists"][0]["is_drafted"] = False
+        snapshot["combat"]["hostiles"][0]["current_job"] = "AttackMelee"
+        self.assertFalse(director.staging_development_allowed(snapshot, prepared))
+        self.assertEqual(director.model_decision_context(snapshot)["threat_state"]["phase"], "active")
+
     def test_locked_heartbeat_replace_falls_back_without_crashing(self):
         with tempfile.TemporaryDirectory() as folder:
             target = pathlib.Path(folder) / "runtime-status.json"
@@ -347,8 +367,31 @@ class DirectorTests(unittest.TestCase):
         candidates, details = director.candidate_actions(None, snapshot, {"anchor": {"x": 10, "z": 10}, "issued": {}})
         self.assertIn("harvest_local_plants", candidates)
         self.assertIn("designate_safe_hunting", candidates)
-        self.assertNotIn("hold_survival", candidates)
+        self.assertIn("hold_survival", candidates)
+        self.assertIn("create_food_stockpile", candidates)
+        self.assertIn("choose_colony_doctrine", candidates)
         self.assertTrue(details["food_emergency_context"]["safe_hunt_targets"])
+
+        medical = copy.deepcopy(snapshot)
+        medical["map"]["resources"] = {"food": 50, "raw_food": 20, "meals": 10, "medicine": 1}
+        medical["development"]["zones"] = [
+            {"type": "Stockpile", "label": "Laya Food"},
+            {"id": 7, "type": "Growing", "label": "Growing zone"},
+        ]
+        medical["development"]["building_counts"] = {"SleepingSpot": 2}
+        medical["development"]["work_tables"] = []
+        medical["development"]["current_research"] = {"name": "Electricity"}
+        medical["development"]["weather"] = {"growth_season_now": True}
+        medical["colonists"][0].update(hunger=0.8, health=0.55, bleeding_rate=0.12, downed=False)
+        doctor = {"id": 2, "name": "Doctor", "health": 1.0, "hunger": 0.8,
+                  "position": {"x": 12, "z": 10}}
+        medical["colonists"].append(doctor)
+        with mock.patch.object(director.bridge, "choose_worker", return_value=doctor):
+            choices, _ = director.candidate_actions(
+                None, medical, {"anchor": {"x": 10, "z": 10}, "issued": {}},
+            )
+        self.assertIn("prioritize_doctor", choices)
+        self.assertIn("harvest_local_plants", choices)
 
     def test_decodes_rle_terrain(self):
         width, height, cells = director.decode_terrain({
@@ -376,6 +419,123 @@ class DirectorTests(unittest.TestCase):
         self.assertEqual(decision["choice"], "create_stockpile")
         self.assertEqual(decision["raw"]["mode"], "single_feasible_action")
 
+    def test_overlay_uses_real_family_probabilities_after_singleton_narrowing(self):
+        snapshot = {"map": {"resources": {"food": 39}, "enemies": 0},
+                    "colonists": [], "animals": [], "development": {"corpses": [], "trade_value": 0}}
+        decision = {"choice": "choose_colony_doctrine", "raw": {
+            "answers": {"colony_goal_action": {"choice": "choose_colony_doctrine",
+                                                "probabilities": {"choose_colony_doctrine": 1.0}}},
+            "family": {"answers": {"colony_goal_family": {
+                "choice": "choose_colony_doctrine",
+                "probabilities": {"choose_colony_doctrine": 0.3, "hold_survival": 0.7},
+            }}},
+        }}
+        with mock.patch.object(director, "show_overlay") as overlay:
+            director.publish_overlay(None, snapshot, ["choose_colony_doctrine"], decision)
+        bars = overlay.call_args.kwargs["bars"]
+        self.assertEqual(len(bars), 2)
+        self.assertEqual({bar["value"] for bar in bars}, {0.3, 0.7})
+        self.assertTrue(next(bar for bar in bars if bar["selected"])["value"] < 1.0)
+
+    def test_overlay_shortens_labels_without_changing_probabilities(self):
+        bars = director.probability_bars(
+            {"trade_now": 0.43, "skip_trade": 0.57},
+            {"trade_now": "A very long trader option explaining every possible detail of the transaction",
+             "skip_trade": "Skip trade"},
+            "skip_trade", 5,
+        )
+        self.assertLessEqual(len(bars[1]["label"]), 44)
+        self.assertEqual([bar["value"] for bar in bars], [0.57, 0.43])
+
+    def test_english_game_overlay_has_no_cyrillic(self):
+        class Client:
+            def __init__(self):
+                self.body = None
+
+            def get(self, path):
+                self.assert_path = path
+                return {"language": "English"}
+
+            def post(self, path, body):
+                self.body = body
+
+        client = Client()
+        snapshot = {"map": {"resources": {"food": 39}, "enemies": 0},
+                    "colonists": [], "animals": [], "development": {"corpses": [], "trade_value": 0}}
+        decision = {"choice": "build_starter_base", "raw": {"answers": {
+            "colony_goal_action": {"choice": "build_starter_base", "probabilities": {
+                "build_starter_base": 0.62, "hold_survival": 0.38,
+            }}}}}
+        director.publish_overlay(client, snapshot, ["build_starter_base", "hold_survival"], decision)
+        self.assertEqual(client.assert_path, "/api/v1/game/settings")
+        self.assertIn("Chosen: Starter base", client.body["text"])
+        self.assertFalse(any("\u0400" <= char <= "\u04ff" for char in client.body["text"]))
+        self.assertFalse(any("\u0400" <= char <= "\u04ff"
+                             for bar in client.body["bars"] for char in bar["label"]))
+
+    def test_live_moded_research_is_a_model_choice_not_ship_route(self):
+        snapshot = {"colonists": [], "game": {}, "map": {"resources": {}}, "development": {
+            "building_counts": {}, "zones": [], "research_tree": [
+                {"name": "ShipBasics", "can_start_now": False, "is_finished": False},
+                {"name": "Mod_AlgaePower", "label": "Algae generators", "can_start_now": True, "research_points": 350},
+            ], "current_research": {"name": "none"},
+        }}
+        options = director.live_research_options(snapshot)
+        self.assertEqual(set(options), {"Mod_AlgaePower"})
+        agent = self.FakeAgent(["select_research"])
+        snapshot["development"]["live_research_options"] = options
+        decision = director.choose_action(agent, snapshot, ["hold_survival", "select_research"])
+        self.assertEqual(decision["research_target"], "Mod_AlgaePower")
+        self.assertEqual(len(agent.calls), 1)  # no fake one-option target question
+
+    def test_live_mod_work_asks_work_then_worker_then_priority(self):
+        colonists = [{"id": 7, "name": "Ada", "health": 0.8, "pain": 0.1, "downed": False,
+                      "work_priorities": {"Mod_AlgaeFarming": {"priority": 3, "disabled": False}},
+                      "skills": {"Plants": {"level": 12, "passion": 2}}, "traits": []}]
+        snapshot = {"colonists": colonists, "game": {}, "map": {"resources": {}}, "development": {
+            "building_counts": {}, "zones": [], "work_types": [{"def_name": "Mod_AlgaeFarming", "label": "Algae farming", "relevant_skills": ["Plants"]}],
+        }}
+        snapshot["development"]["live_work_options"] = director.live_work_options(snapshot)
+        self.assertIn("Mod_AlgaeFarming", snapshot["development"]["live_work_options"])
+        agent = self.FakeAgent(["set_work_priority", "1"])
+        decision = director.choose_action(agent, snapshot, ["hold_survival", "set_work_priority"])
+        self.assertEqual((decision["work_type"], decision["worker_pawn"], decision["work_priority"]),
+                         ("Mod_AlgaeFarming", 7, 1))
+        self.assertEqual(len(agent.calls), 2)  # one-option work/worker resolved by code
+        self.assertIn("Plants 12", director.worker_criteria(snapshot, "Mod_AlgaeFarming")["7"])
+
+        class Client:
+            def __init__(self):
+                self.calls = []
+            def post(self, endpoint, **kwargs):
+                self.calls.append((endpoint, kwargs))
+                return {"success": True}
+
+        client = Client()
+        result = director.execute_action(client, {**snapshot, "map": {"id": 1, "resources": {}}},
+                                         {"issued": {}, "anchor": {"x": 10, "z": 10}},
+                                         "set_work_priority", decision)
+        self.assertTrue(result["applied"])
+        self.assertEqual(client.calls[0][1]["body"], {"id": 7, "work": "Mod_AlgaeFarming", "priority": 1})
+
+    def test_large_option_set_keeps_last_option_reachable(self):
+        options = {f"option_{index}": f"Project {index}" for index in range(17)}
+        class TailAgent:
+            def __init__(self):
+                self.calls = []
+            def predict(self, state, questions):
+                self.calls.append(questions)
+                question_id, question = next(iter(questions.items()))
+                criteria = question["criteria"]
+                chosen = "option_16" if "option_16" in criteria else next(iter(criteria))
+                return {"answers": {question_id: {"choice": chosen, "confidence": 0.9}}}
+        agent = TailAgent()
+        selected, raw = director.ask_laya_choice(agent, {}, "project", "Choose a project", options)
+        self.assertEqual(selected, "option_16")
+        self.assertEqual(len(agent.calls), 4)
+        self.assertEqual(len(raw["narrowing"]), 3)
+        self.assertEqual(set().union(*(set(next(iter(call.values()))["criteria"]) for call in agent.calls[:-1])), set(options))
+
     def test_rejected_hunting_does_not_ask_for_a_target(self):
         agent = self.FakeAgent(["hold_survival"])
         snapshot = {"colonists": [], "game": {}, "map": {"resources": {}}, "development": {
@@ -390,7 +550,9 @@ class DirectorTests(unittest.TestCase):
         agent = self.FakeAgent(["designate_safe_hunting", "7"])
         snapshot = {"colonists": [], "game": {}, "map": {"resources": {}}, "development": {
             "hunt_options": [{"id": 7, "def": "Hare", "gender": "Female", "combat_power": 10, "harm_revenge_chance": 0,
-                              "meat_amount": 18, "leather_amount": 8, "market_value": 60}],
+                              "meat_amount": 18, "leather_amount": 8, "market_value": 60},
+                             {"id": 8, "def": "Deer", "gender": "Male", "combat_power": 30, "harm_revenge_chance": 0.02,
+                              "meat_amount": 55, "leather_amount": 20, "market_value": 150}],
             "wild_plant_options": {"Plant_Ambrosia": {"count": 4}}, "fighter_context": {}, "building_counts": {}, "zones": [],
         }}
         result = director.choose_action(agent, snapshot, ["designate_safe_hunting", "hold_survival"])
@@ -568,6 +730,102 @@ class DirectorTests(unittest.TestCase):
         second = director.architect.generate_house_candidates(*args, powered=True, climate="cold", seed=7)
         self.assertEqual(first, second)
 
+    def test_house_entrance_is_laya_chosen_but_door_offset_varies_by_seed(self):
+        context = {"material": "BlocksGranite", "entry_side": "west", "building_catalog": [],
+                   "finished_research": [], "item_counts": {"BlocksGranite": 2000, "WoodLog": 1000},
+                   "powered": False, "climate": "temperate"}
+        door_positions = set()
+        for seed in range(8):
+            variants = director.architect.generate_program_variants("residence", context, seed=seed)
+            layout = variants["house_compact_1"]["layout"]
+            door = next(row for row in layout["buildings"] if row["def_name"] == "Door")
+            self.assertEqual(door["rel_x"], 0)
+            self.assertTrue(all(row["stuff_def_name"] == "BlocksGranite"
+                                for row in layout["buildings"] if row["def_name"] == "Wall"))
+            door_positions.add((door["rel_x"], door["rel_z"]))
+            self.assertEqual(variants, director.architect.generate_program_variants("residence", context, seed=seed))
+        self.assertGreater(len(door_positions), 1)
+
+    def test_architecture_materials_exclude_unfinishable_wall_plans(self):
+        context = {"building_catalog": [], "finished_research": [], "item_counts": {"WoodLog": 205},
+                   "material": "WoodLog", "powered": False, "climate": "temperate"}
+        options = director.architect.affordable_material_options("residence", context,
+                                                                   {"WoodLog": "205 wood"}, seed=1)
+        self.assertEqual(options, {})
+        context["item_counts"]["WoodLog"] = 1000
+        options = director.architect.affordable_material_options("residence", context,
+                                                                   {"WoodLog": "1000 wood"}, seed=1)
+        self.assertIn("WoodLog", options)
+
+    def test_generated_architecture_has_no_overlapping_anchors(self):
+        base = {"building_catalog": [], "finished_research": ["Electricity"],
+                "item_counts": {"WoodLog": 9000, "Steel": 5000},
+                "material": "WoodLog", "powered": True, "climate": "cold"}
+        for program in director.architect.PROGRAM_CATALOG:
+            for entry_side in ("north", "east", "south", "west"):
+                for seed in range(4):
+                    variants = director.architect.generate_program_variants(
+                        program, {**base, "entry_side": entry_side}, seed=seed)
+                    self.assertTrue(variants)
+                    for key, variant in variants.items():
+                        with self.subTest(program=program, side=entry_side, seed=seed, variant=key):
+                            self.assertEqual(director.architect.layout_anchor_conflicts(
+                                variant["layout"]), [])
+
+    def test_freezer_cooler_does_not_replace_selected_east_entrance(self):
+        context = {"building_catalog": [], "finished_research": [],
+                   "item_counts": {"WoodLog": 9000}, "material": "WoodLog",
+                   "entry_side": "east", "powered": False, "climate": "temperate"}
+        for seed in range(8):
+            layout = director.architect.generate_program_variants("freezer", context, seed=seed)["freezer_1"]["layout"]
+            door = next(item for item in layout["buildings"] if item["def_name"] == "Door")
+            cooler = next(item for item in layout["buildings"] if item["def_name"] == "Cooler")
+            self.assertEqual(door["rel_x"], layout["width"] - 1)
+            self.assertNotEqual((door["rel_x"], door["rel_z"]),
+                                (cooler["rel_x"], cooler["rel_z"]))
+
+    def test_freezer_plan_needs_unlocked_cooler_and_components(self):
+        context = {"building_catalog": [{"def_name": "Cooler", "available_now": False,
+                                         "cost_list": [{"thing_def": "Steel", "count": 90},
+                                                       {"thing_def": "ComponentIndustrial", "count": 3}]}],
+                   "finished_research": [],
+                   "item_counts": {"WoodLog": 2000, "Steel": 500, "ComponentIndustrial": 2},
+                   "material": "WoodLog", "powered": True, "climate": "temperate"}
+        self.assertEqual(director.architect.generate_program_variants("freezer", context), {})
+        context["building_catalog"][0]["available_now"] = True
+        variants = director.architect.generate_program_variants("freezer", context)
+        self.assertEqual(director.architect.affordable_variants(variants, context), {})
+        context["item_counts"]["ComponentIndustrial"] = 4
+        feasible = director.architect.affordable_variants(variants, context)
+        self.assertTrue(feasible)
+        self.assertEqual(feasible["freezer_1"]["estimated_stuff_cost"]["ComponentIndustrial"], 3)
+
+    def test_architecture_cost_includes_known_floor_materials(self):
+        layout = director.architect.blueprint(
+            [director.architect.building("Wall", 0, 0, stuff="BlocksGranite")], 2, 2,
+            [director.architect.floor("TileGranite", 1, 1)])
+        self.assertEqual(director.architect.estimated_stuff_cost(layout, []), {"BlocksGranite": 9})
+
+    def test_stone_throne_room_uses_compatible_fabric_drapes(self):
+        context = {"building_catalog": [{"def_name": "Drape", "available_now": True,
+                                         "cost_stuff_count": 20, "stuff_categories": ["Fabric"]}],
+                   "finished_research": [], "item_counts": {"BlocksGranite": 9000, "Cloth": 1000},
+                   "material": "BlocksGranite", "powered": False}
+        layout = director.architect.generate_program_variants("throne_room", context)["throne_room_1"]["layout"]
+        drapes = [item for item in layout["buildings"] if item["def_name"] == "Drape"]
+        self.assertTrue(drapes)
+        self.assertTrue(all(item["stuff_def_name"] == "Cloth" for item in drapes))
+        context["item_counts"].pop("Cloth")
+        context["item_counts"]["ComponentIndustrial"] = 10000
+        self.assertEqual(director.architect.generate_program_variants("throne_room", context), {})
+
+    def test_selected_wall_material_is_not_silently_replaced(self):
+        context = {"building_catalog": [{"def_name": "Wall", "available_now": True,
+                                         "cost_stuff_count": 5, "stuff_categories": ["Woody", "Stony"]}],
+                   "finished_research": [], "item_counts": {"WoodLog": 2000},
+                   "material": "BlocksGranite", "powered": False}
+        self.assertEqual(director.architect.generate_program_variants("residence", context), {})
+
     def test_hospital_variant_upgrades_beds_monitor_floor_and_light(self):
         catalog = [
             {"def_name": name, "available_now": True}
@@ -658,7 +916,7 @@ class DirectorTests(unittest.TestCase):
         self.assertEqual(len(agent.calls), 1)
 
     def test_selected_residence_uses_program_style_variant_hierarchy(self):
-        agent = self.FakeAgent(["plan_architecture", "residence", "compact", "house_compact_1"])
+        agent = self.FakeAgent(["plan_architecture", "south", "compact", "house_compact_1"])
         snapshot = {"colonists": [], "game": {}, "map": {"resources": {}}, "development": {
             "building_counts": {}, "zones": [],
             "architecture_program_options": {"residence": "housing shortage"},
@@ -669,9 +927,76 @@ class DirectorTests(unittest.TestCase):
         }}
         result = director.choose_action(agent, snapshot, ["plan_architecture", "hold_survival"])
         self.assertEqual(result["architecture_program"], "residence")
+        self.assertEqual(result["architecture_material"], "WoodLog")
+        self.assertEqual(result["architecture_entry"], "south")
         self.assertEqual(result["architecture_house_style"], "compact")
         self.assertEqual(result["architecture_variant"], "house_compact_1")
         self.assertEqual(len(agent.calls), 4)
+
+    def test_laya_selects_wall_material_before_layout(self):
+        agent = self.FakeAgent(["plan_architecture", "BlocksGranite", "west",
+                                "compact", "house_compact_1"])
+        context = {"building_catalog": [], "finished_research": [],
+                   "item_counts": {"WoodLog": 2000, "BlocksGranite": 2000},
+                   "material_options": {"WoodLog": "wood", "BlocksGranite": "fireproof stone"},
+                   "material": "WoodLog", "powered": False, "climate": "temperate", "variant_seed": 5}
+        snapshot = {"colonists": [], "game": {}, "map": {"resources": {}}, "development": {
+            "building_counts": {}, "zones": [], "architecture_program_options": {"residence": "need homes"},
+            "architecture_context": context}}
+        result = director.choose_action(agent, snapshot, ["plan_architecture", "hold_survival"])
+        self.assertEqual(result["architecture_material"], "BlocksGranite")
+        self.assertEqual(result["architecture_entry"], "west")
+        self.assertEqual(len(agent.calls), 5)
+
+    def test_architecture_execution_uses_layas_saved_design(self):
+        context = {"building_catalog": [], "finished_research": [],
+                   "item_counts": {"WoodLog": 2000, "BlocksGranite": 2000},
+                   "material_options": {"WoodLog": "wood", "BlocksGranite": "stone"},
+                   "material": "WoodLog", "powered": False, "climate": "temperate", "variant_seed": 5}
+        agent = self.FakeAgent(["plan_architecture", "BlocksGranite", "west",
+                                "compact", "house_compact_1"])
+        snapshot = {"colonists": [], "game": {"tick": 500}, "map": {"id": 1, "resources": {}},
+                    "development": {"building_counts": {}, "zones": [],
+                                    "architecture_program_options": {"residence": "need homes"},
+                                    "architecture_context": context}}
+        decision = director.choose_action(agent, snapshot, ["plan_architecture", "hold_survival"])
+
+        class Client:
+            def __init__(self):
+                self.posts = []
+
+            def get(self, endpoint, **kwargs):
+                return {}
+
+            def post(self, endpoint, **kwargs):
+                self.posts.append((endpoint, kwargs))
+                return {"success": True}
+
+        client = Client()
+        with mock.patch.object(director, "find_terrain_rect", return_value={"x": 40, "z": 20}), \
+             mock.patch.object(director, "prioritize", return_value={"applied": True}):
+            result = director.execute_action(client, snapshot, {"issued": {}, "anchor": {"x": 10, "z": 10}},
+                                             "plan_architecture", {**decision, "architecture_context": context})
+        self.assertTrue(result["applied"])
+        self.assertEqual(result["project"]["material"], "BlocksGranite")
+        self.assertEqual(result["project"]["entry"], "west")
+        endpoint, request = client.posts[0]
+        self.assertEqual(endpoint, "/api/v1/builder/blueprint")
+        buildings = request["body"]["blueprint"]["buildings"]
+        self.assertTrue(all(item["stuff_def_name"] == "BlocksGranite"
+                            for item in buildings if item["def_name"] == "Wall"))
+        self.assertEqual(next(item for item in buildings if item["def_name"] == "Door")["rel_x"], 0)
+
+    def test_architecture_execution_refuses_stale_material(self):
+        context = {"building_catalog": [], "finished_research": [],
+                   "item_counts": {"WoodLog": 2000}, "material_options": {"WoodLog": "wood"},
+                   "material": "WoodLog", "powered": False, "variant_seed": 2}
+        result = director.execute_action(None, {"map": {"id": 1}, "game": {"tick": 1}},
+                                         {"anchor": {"x": 5, "z": 5}, "issued": {}}, "plan_architecture",
+                                         {"architecture_program": "residence", "architecture_variant": "house_compact_1",
+                                          "architecture_material": "BlocksGranite", "architecture_entry": "south",
+                                          "architecture_context": context})
+        self.assertFalse(result["applied"])
 
     def test_strategy_catalog_covers_core_and_every_official_expansion(self):
         expansions = {row.get("expansion") or "core" for row in colony_strategy.DIRECTIONS.values()}
@@ -691,8 +1016,8 @@ class DirectorTests(unittest.TestCase):
     def test_doctrine_is_a_conditional_cascade(self):
         choices = [
             "choose_colony_doctrine", "prosperity", "industrial_manufacturing",
-            "compact", "manufacturing", "industrial", "ranged_firepower", "pragmatic",
-            "ship_escape", "peaceful_trade", "WoodLog", "balanced", "components",
+            "compact", "manufacturing", "industrial", "industrial", "ranged_firepower", "pragmatic",
+            "ship_escape", "peaceful_trade", "expansionist", "peaceful_trade", "balanced", "components",
         ]
         agent = self.FakeAgent(choices)
         context = {
@@ -748,6 +1073,133 @@ class DirectorTests(unittest.TestCase):
         self.assertEqual(state, "error")
         self.assertEqual(detail, "invalid combat target")
         self.assertEqual(prefix, "Decision cycle problem")
+
+    def test_post_combat_care_selects_patient_and_doctor_then_avoids_duplicate_job(self):
+        class Client:
+            def __init__(self):
+                self.posts = []
+
+            def post(self, endpoint, body=None, query=None):
+                self.posts.append((endpoint, body, query))
+                return {"success": True}
+
+        patient = {"id": 1, "name": "Patient", "health": 0.51, "bleeding_rate": 0.2,
+                   "tendable_now": True, "is_down": False, "is_downed": True}
+        doctor = {"id": 2, "name": "Doctor", "health": 1.0, "medicine_skill": 9,
+                  "moving": 1.0, "manipulation": 1.0, "tendable_now": False}
+        snapshot = {"combat": {"hostiles": [], "colonists": [patient, doctor]},
+                    "game": {"is_paused": False}, "map": {"resources": {"medicine": 1}}}
+        self.assertIn("tend_1_2", director.post_combat_care_options(snapshot))
+        client = Client()
+        with tempfile.TemporaryDirectory() as folder:
+            record = director.run_post_combat_care_cycle(
+                client, self.FakeAgent(["tend_1_2"]), snapshot, pathlib.Path(folder) / "care.jsonl"
+            )
+        self.assertEqual(record["decision"]["choice"], "tend_1_2")
+        self.assertEqual(client.posts[-1][1]["patient_pawn_id"], 1)
+        self.assertEqual(client.posts[-1][1]["doctor_pawn_id"], 2)
+        doctor.update(current_job="TendPatient", current_job_target_id=1)
+        self.assertEqual(director.post_combat_care_options(snapshot), {})
+        self.assertTrue(director.treatment_job_in_progress(snapshot))
+        patient["tendable_now"] = False
+        self.assertFalse(director.treatment_job_in_progress(snapshot))
+
+    def test_post_combat_care_excludes_doctor_with_disabled_medicine(self):
+        snapshot = {"combat": {"colonists": [
+            {"id": 1, "name": "Patient", "tendable_now": True, "is_downed": True},
+            {"id": 2, "name": "Belken", "medicine_skill": 5, "moving": 1, "manipulation": 1},
+            {"id": 3, "name": "Four Eyes", "medicine_skill": 0, "moving": 1, "manipulation": 1},
+        ]}, "colonists": [
+            {"id": 2, "skills": {"Medicine": {"disabled": False}}},
+            {"id": 3, "skills": {"Medicine": {"disabled": True}}},
+        ]}
+        options = director.post_combat_care_options(snapshot)
+        self.assertIn("tend_1_2", options)
+        self.assertNotIn("tend_1_3", options)
+
+    def test_chosen_treatment_keeps_mobile_bleeding_patient_in_doctor_reach(self):
+        class Client:
+            def __init__(self):
+                self.posts = []
+
+            def post(self, endpoint, body=None, query=None):
+                self.posts.append((endpoint, body))
+                return {"success": True}
+
+        snapshot = {"combat": {"hostiles": [], "colonists": [
+            {"id": 1, "name": "Patient", "health": 0.5, "bleeding_rate": 1.4,
+             "tendable_now": True, "is_downed": False, "current_job": "HaulToCell"},
+            {"id": 2, "name": "Doctor", "medicine_skill": 5,
+             "moving": 1, "manipulation": 1, "current_job": "Sow"},
+        ]}, "game": {"is_paused": False}, "map": {"resources": {"medicine": 2}}}
+        client = Client()
+        with tempfile.TemporaryDirectory() as folder:
+            record = director.run_post_combat_care_cycle(
+                client, self.FakeAgent(["tend_1_2"]), snapshot,
+                pathlib.Path(folder) / "care.jsonl",
+            )
+        self.assertEqual([endpoint for endpoint, _ in client.posts[-2:]],
+                         ["/api/v1/pawn/job", "/api/v1/pawn/medical/tend"])
+        self.assertEqual(client.posts[-2][1]["job_def"], "Wait_MaintainPosture")
+        self.assertTrue(record["result"]["patient_hold"]["success"])
+
+    def test_completed_short_advance_requests_a_new_shooting_decision(self):
+        record = {"action": {"commands": [{"endpoint": "/api/v1/combat/tactic", "body": {
+            "tactic": "focus_fire", "fighter_ids": [1], "target_pawn_id": 99,
+        }}]}, "result": {"responses": [{"positioned_pawn_ids": [1]}]}}
+        snapshot = {"combat": {"colonists": [{"id": 1, "current_job": "Goto"}]}}
+        self.assertFalse(director.combat_positioning_finished(snapshot, record, 1.0))
+        self.assertFalse(director.combat_positioning_finished(snapshot, record, 3.0))
+        snapshot["combat"]["colonists"][0]["current_job"] = "Wait"
+        self.assertTrue(director.combat_positioning_finished(snapshot, record, 3.0))
+
+    def test_post_combat_care_can_be_deferred_even_if_only_one_treatment_exists(self):
+        class Client:
+            def __init__(self):
+                self.posts = []
+
+            def post(self, endpoint, body=None, query=None):
+                self.posts.append((endpoint, body, query))
+
+        snapshot = {"combat": {"hostiles": [], "colonists": [
+            {"id": 1, "name": "Patient", "health": 0.6, "bleeding_rate": 0.1,
+             "tendable_now": True, "is_downed": True},
+            {"id": 2, "name": "Doctor", "health": 1, "moving": 1, "manipulation": 1,
+             "medicine_skill": 8},
+        ]}, "game": {"is_paused": False}, "map": {"resources": {"medicine": 0}}}
+        client = Client()
+        agent = self.FakeAgent(["defer_care"])
+        with tempfile.TemporaryDirectory() as folder:
+            record = director.run_post_combat_care_cycle(
+                client, agent, snapshot, pathlib.Path(folder) / "care.jsonl"
+            )
+        self.assertTrue(record["result"]["deferred"])
+        self.assertTrue(record["result"]["revisit"])
+        self.assertFalse(any(endpoint == "/api/v1/pawn/medical/tend" for endpoint, _, _ in client.posts))
+        self.assertTrue(any(endpoint == "/api/v1/ui/announce" for endpoint, _, _ in client.posts))
+        self.assertIn("tend_1_2", agent.calls[0]["post_combat_care"]["criteria"])
+        self.assertIn("resume_colony_decisions", agent.calls[0]["post_combat_care"]["criteria"])
+
+    def test_returning_to_colony_decisions_does_not_force_another_care_prompt(self):
+        class Client:
+            def post(self, endpoint, body=None, query=None):
+                if endpoint != "/api/v1/ui/announce":
+                    raise AssertionError("No treatment or pause command is needed")
+                return {"success": True}
+
+        snapshot = {"combat": {"hostiles": [], "colonists": [
+            {"id": 1, "name": "Patient", "health": 0.6, "bleeding_rate": 0.1,
+             "tendable_now": True, "is_downed": True},
+            {"id": 2, "name": "Doctor", "health": 1, "moving": 1, "manipulation": 1,
+             "medicine_skill": 8},
+        ]}, "game": {"is_paused": False}, "map": {"resources": {"medicine": 0}}}
+        with tempfile.TemporaryDirectory() as folder:
+            record = director.run_post_combat_care_cycle(
+                Client(), self.FakeAgent(["resume_colony_decisions"]),
+                snapshot, pathlib.Path(folder) / "care.jsonl",
+            )
+        self.assertTrue(record["result"]["deferred"])
+        self.assertFalse(record["result"]["revisit"])
 
 
 if __name__ == "__main__":

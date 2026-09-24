@@ -129,6 +129,12 @@ namespace RIMAPI.Services
                     {
                         return ApiResult.Fail($"Doctor pawn not found: {request.DoctorPawnId}");
                     }
+                    if (doctor == patient)
+                    {
+                        if (!request.SelfTend || patient.Downed || patient.playerSettings == null)
+                            return ApiResult.Fail("Self-tend requires a mobile colonist and an explicit self_tend request");
+                        patient.playerSettings.selfTend = true;
+                    }
                 }
                 else
                 {

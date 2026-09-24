@@ -42,8 +42,8 @@ class RosterAgent:
         for question_id, question in questions.items():
             if question_id == "threat_action":
                 choice = "engage_ranged"
-            elif question_id == "fighter_10":
-                choice = "reserve"
+            elif question_id == "combat_team":
+                choice = next(key for key in question["criteria"] if key == "team_11")
             else:
                 choice = "deploy"
             answers[question_id] = {"choice": choice, "confidence": 0.9, "probabilities": {choice: 1.0}}
@@ -167,7 +167,7 @@ class BridgeTests(unittest.TestCase):
         decision = bridge.decide(None, snapshot, 0.6)
         self.assertEqual(decision["choice"], "prepare_undrafted")
 
-    def test_staging_raid_offers_rest_or_preemptive_strike_not_idle_draft(self):
+    def test_staging_raid_keeps_both_preparation_and_combat_options(self):
         snapshot = self.snapshot()
         snapshot["map"]["enemies"] = 2
         snapshot["combat"] = {
@@ -188,7 +188,8 @@ class BridgeTests(unittest.TestCase):
             "available_weapons": [],
         }
         criteria = bridge.make_questions(snapshot)["threat_action"]["criteria"]
-        self.assertEqual(set(criteria), {"prepare_undrafted", "preemptive_strike"})
+        self.assertTrue({"prepare_undrafted", "hold_and_observe", "preemptive_strike",
+                         "advance_to_range", "hold_cover"}.issubset(criteria))
         action = bridge.plan_action(snapshot, {"choice": "prepare_undrafted"})
         self.assertEqual(action["commands"][0]["body"], {"pawn_id": 10, "is_drafted": False})
 
@@ -325,7 +326,7 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual({command["body"]["pawn_id"] for command in attack_commands}, {10, 11})
         self.assertTrue(all(command["body"]["target_thing_id"] == 99 for command in attack_commands))
 
-    def test_laya_selects_combat_roster_using_health_context(self):
+    def test_regular_attack_includes_all_available_fighters_without_a_roster_subchoice(self):
         snapshot = self.snapshot()
         snapshot["map"]["enemies"] = 1
         snapshot["combat"] = {
@@ -348,11 +349,11 @@ class BridgeTests(unittest.TestCase):
         }
         agent = RosterAgent()
         decision = bridge.decide(agent, snapshot, 0.0)
-        self.assertEqual(decision["selected_fighter_ids"], [11])
-        self.assertEqual(len(agent.calls), 2)
+        self.assertIsNone(decision["selected_fighter_ids"])
+        self.assertEqual(len(agent.calls), 1)
         action = bridge.plan_action(snapshot, decision)
         attacks = [c for c in action["commands"] if c.get("body", {}).get("job_def") == "AttackStatic"]
-        self.assertEqual([c["body"]["pawn_id"] for c in attacks], [11])
+        self.assertEqual({c["body"]["pawn_id"] for c in attacks}, {10, 11})
 
     def test_remote_api_is_rejected(self):
         with self.assertRaises(ValueError):

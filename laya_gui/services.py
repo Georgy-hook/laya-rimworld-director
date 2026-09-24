@@ -16,7 +16,7 @@ from typing import Any
 from urllib.request import Request, urlopen
 
 
-APP_NAME = "RimWorld Autopilot 0.0.3"
+APP_NAME = "RimWorld Autopilot 0.0.4"
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1]
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", BASE_DIR))
 DATA_DIR = (Path(os.environ.get("LOCALAPPDATA", str(BASE_DIR))) / "RimWorld Autopilot") if getattr(sys, "frozen", False) else BASE_DIR
@@ -24,6 +24,7 @@ CONFIG_PATH = DATA_DIR / "rimworld-autopilot.json"
 PACKAGED_CONFIG_PATH = BASE_DIR / "rimworld-autopilot.json"
 LEGACY_CONFIG_PATH = BASE_DIR / "laya-control.json"
 PREFERENCES_PATH = DATA_DIR / "autopilot-preferences.json"
+FEEDBACK_PATH = DATA_DIR / "laya-feedback.jsonl"
 DEFAULT_CONFIG = {
     "python_exe": str(BASE_DIR / ".venv" / "Scripts" / "python.exe"),
     "director_script": str(BASE_DIR / "colony_director.py"),
@@ -217,6 +218,30 @@ def export_history(log_path: Path, destination: Path) -> None:
             ])
 
 
+def append_feedback(path: Path, record: dict[str, Any], corrected_choice: str, note: str = "") -> None:
+    """Keep human corrections as labels; never treat them as online weight updates."""
+    candidates = list(record.get("candidates") or [])
+    raw = (record.get("decision") or {}).get("raw") or {}
+    if corrected_choice not in candidates:
+        raise ValueError("Correction must be one of the recorded feasible actions")
+    if not isinstance(raw.get("visible_state"), dict):
+        raise ValueError("This older decision has no saved model context to label")
+    feedback = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "decision_timestamp": record.get("timestamp"),
+        "map_seed": record.get("map_seed"),
+        "visible_state": raw["visible_state"],
+        "candidates": candidates,
+        "model_choice": (record.get("decision") or {}).get("choice"),
+        "human_choice": corrected_choice,
+        "note": str(note)[:1000],
+        "question_path": {key: raw.get(key) for key in ("domain", "family", "action", "details")},
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(feedback, ensure_ascii=False, default=str) + "\n")
+
+
 def export_bundle(destination: Path, log_path: Path, state_path: Path) -> None:
     with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as archive:
         for pattern in ("*.py", "*.md", "*.ps1", "*.cmd", "*.json"):
@@ -228,7 +253,7 @@ def export_bundle(destination: Path, log_path: Path, state_path: Path) -> None:
                 for path in root.rglob("*"):
                     if path.is_file() and "__pycache__" not in path.parts:
                         archive.write(path, path.relative_to(BASE_DIR))
-        for path in (log_path, state_path):
+        for path in (log_path, state_path, FEEDBACK_PATH):
             if path.exists():
                 archive.write(path, f"logs/{path.name}")
 

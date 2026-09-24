@@ -1,4 +1,5 @@
 import tempfile
+import json
 import unittest
 from pathlib import Path
 
@@ -6,9 +7,26 @@ import laya_preferences
 import colony_combat
 import colony_director
 from laya_gui.i18n import humanize
+from laya_gui.services import append_feedback
 
 
 class PreferenceTests(unittest.TestCase):
+    def test_human_correction_records_visible_context_without_changing_model(self):
+        record = {
+            "timestamp": "2026-09-23T12:00:00Z", "map_seed": "test",
+            "candidates": ["hold_survival", "harvest_local_plants"],
+            "decision": {"choice": "hold_survival", "raw": {"visible_state": {"needs": {"food": 0}},
+                         "action": {"question": {"criteria": {"hold_survival": "wait", "harvest_local_plants": "food"}}}}},
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "feedback.jsonl"
+            append_feedback(path, record, "harvest_local_plants", "Starving")
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["human_choice"], "harvest_local_plants")
+            self.assertEqual(saved["visible_state"]["needs"]["food"], 0)
+            with self.assertRaises(ValueError):
+                append_feedback(path, record, "build_ship")
+
     def test_preferences_round_trip_and_clamp_values(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "preferences.json"
@@ -66,6 +84,13 @@ class PreferenceTests(unittest.TestCase):
         examples = ["ranged_firepower", "food_crops", "separate_houses", "research_technology"]
         for language in ("ru", "en"):
             for value in examples:
+                friendly = humanize(value, language)
+                self.assertNotIn("_", friendly)
+                self.assertNotEqual(value, friendly)
+
+    def test_friendly_history_names_architecture_choices(self):
+        for language in ("ru", "en"):
+            for value in ("residence", "freezer_2", "house_artisan_3", "BlocksGranite", "west"):
                 friendly = humanize(value, language)
                 self.assertNotIn("_", friendly)
                 self.assertNotEqual(value, friendly)

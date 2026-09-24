@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from itertools import combinations
 import json
 import os
 import sys
@@ -15,11 +16,12 @@ from urllib.request import Request, urlopen
 
 import colony_combat as combat_planner
 import laya_preferences
+from laya_decisions import ask_laya_choice
 
 
 DEFAULT_API_URL = "http://localhost:8765"
 DEFAULT_MODEL = "convaiinnovations/laya"
-__version__ = "0.0.3"
+__version__ = "0.0.4"
 SAFE_WORK_TYPES = {
     "prioritize_cooking": "Cooking",
     "prioritize_growing": "Growing",
@@ -41,6 +43,7 @@ COMBAT_CHOICES = {
     "equip_emp_weapon",
     "focus_mechanoids",
     "focus_insects",
+    "emergency_self_tend",
 }
 COMBAT_CHOICES.update(combat_planner.TACTICS)
 
@@ -390,11 +393,13 @@ def decision_state(snapshot: dict[str, Any]) -> dict[str, Any]:
             needs = welfare.get(row.get("id")) or {}
             return (
                 f"{row.get('name') or row.get('id')}#{row.get('id')} hp={first_number(row.get('health')):.2f} "
-                f"{'down' if row.get('is_downed') else 'up'} "
+                f"{'down' if row.get('is_downed') else 'mental_break' if row.get('is_in_mental_state') else 'up'} "
                 f"{row.get('weapon_def') or 'unarmed'} range={first_number(row.get('weapon_range')):.0f} "
                 f"armor={first_number(row.get('armor_sharp')):.2f} shoot={row.get('shooting_skill')} "
                 f"melee={row.get('melee_skill')} dist={first_number(row.get('distance_to_nearest_opponent')):.0f} "
+                f"pos={row.get('position')} "
                 f"move={first_number(row.get('moving'), 1):.2f} pain={first_number(row.get('pain')):.2f} "
+                f"bleed={first_number(row.get('bleeding_rate')):.2f} tendable={bool(row.get('tendable_now'))} "
                 f"rest={first_number(needs.get('rest'), 1):.2f} food={first_number(needs.get('hunger'), 1):.2f} "
                 f"job={row.get('current_job')} target={row.get('current_job_target_id')}"
             )
@@ -403,6 +408,7 @@ def decision_state(snapshot: dict[str, Any]) -> dict[str, Any]:
                 f"{row.get('kind_def') or row.get('name')}#{row.get('id')} hp={first_number(row.get('health')):.2f} "
                 f"{row.get('weapon_def') or 'unarmed'} job={row.get('current_job')} "
                 f"group={row.get('lord_toil_name') or ''} "
+                f"range={first_number(row.get('weapon_range')):.0f} "
                 f"dist={first_number(row.get('distance_to_nearest_opponent')):.0f} "
                 f"power={first_number(row.get('combat_power')):.0f} carrying={row.get('carrying_pawn_id')}"
             )
@@ -413,16 +419,47 @@ def decision_state(snapshot: dict[str, Any]) -> dict[str, Any]:
         ranked_fighters = sorted(combat.get("colonists", []), key=lambda row: (
             not bool(row.get("has_ranged_weapon")), first_number(row.get("distance_to_nearest_opponent"), 9999),
         ))
+        active_enemies = [row for row in combat.get("hostiles", [])
+                          if not row.get("is_dead") and not row.get("is_downed")]
+        available_allies = [row for row in combat.get("colonists", [])
+                            if not row.get("is_dead") and not row.get("is_downed")
+                            and not row.get("is_in_mental_state")]
+        enemy_gear = sorted({str(row.get("weapon_def") or row.get("kind_def") or "unknown")
+                             for row in active_enemies})
+        allied_gear = sorted({str(row.get("weapon_def") or "unarmed") for row in available_allies})
         return {
             "task": task,
             "paused": bool(snapshot["game"].get("is_paused")),
-            "hostiles": [hostile(row) for row in ranked_hostiles[:4]],
+            "hostiles": [hostile(row) for row in ranked_hostiles[:8]],
             "hostile_count": len(combat.get("hostiles", [])),
-            "fighters": [fighter(row) for row in ranked_fighters[:4]],
+            "fighters": [fighter(row) for row in ranked_fighters[:12]],
             "fighter_count": len(combat.get("colonists", [])),
+            "force_balance": {
+                "active_enemies": len(active_enemies),
+                "enemy_gear": enemy_gear[:12],
+                "enemy_health": [round(first_number(row.get("health"), 1), 2) for row in active_enemies[:12]],
+                "available_allies": len(available_allies),
+                "available_shooters": sum(bool(row.get("has_ranged_weapon")) for row in available_allies),
+                "available_armed_melee": sum(bool(row.get("weapon_def")) and not row.get("has_ranged_weapon")
+                                              for row in available_allies),
+                "downed_allies": sum(bool(row.get("is_downed")) for row in combat.get("colonists", [])),
+                "allies_in_mental_break": sum(bool(row.get("is_in_mental_state")) for row in combat.get("colonists", [])),
+                "allied_gear": allied_gear[:12],
+                "shooters_in_range": sum(bool(row.get("has_ranged_weapon")) and
+                                         first_number(row.get("distance_to_nearest_opponent"), 9999)
+                                         <= first_number(row.get("weapon_range")) + 1
+                                         for row in available_allies),
+            },
+            "combat_tradeoff": (
+                "Keeping a wounded fighter may cost that fighter's life, but withdrawing them removes firepower "
+                "or a melee screen and can doom everyone else. Withdrawing the whole team may preserve survivors "
+                "for regrouping, but stops fire and may let enemies pursue or capture someone. A fighter can also "
+                "deliberately hold danger so others escape. Compare both risks using live health, enemy numbers, "
+                "weapons, ranges, terrain and remaining defenses; none of these outcomes is mandatory."
+            ),
             "defenses": sorted({str(row.get("kind")) for row in combat.get("defenses", [])})[:8],
             "free_weapons": [str(row.get("label") or row.get("def_name")) for row in combat.get("available_weapons", [])[:6]],
-            "rule": "Do not send unarmed civilians into melee. While raiders prepare, equip capable colonists from nearby free weapons and let the rest eat, rest and work. If an unarmed enemy reaches the colony, retreat along a safe route instead of idling.",
+            "risk_context": "Unarmed civilians face high melee risk. Raiders who are still preparing leave time to eat, rest, equip and work. An advancing or kidnapping enemy changes that tradeoff.",
         }
     return {
         "task": task,
@@ -452,12 +489,138 @@ def decision_state(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def combat_model_context(agent: Any, snapshot: dict[str, Any], *,
+                         role_target: dict[str, Any] | None = None,
+                         assigned_roles: dict[int, str] | None = None) -> dict[str, Any]:
+    """Fit actionable combat evidence into Laya's real state-token window."""
+    if not snapshot["combat"].get("hostiles"):
+        return decision_state(snapshot)
+    combat = snapshot["combat"]
+    active = [row for row in combat.get("hostiles", []) if not row.get("is_dead") and not row.get("is_downed")]
+    available = [row for row in combat.get("colonists", []) if not row.get("is_dead")
+                 and not row.get("is_downed") and not row.get("is_in_mental_state")]
+    fighters = sorted(combat.get("colonists", []), key=lambda row: (
+        not bool(row.get("tendable_now") or row.get("bleeding_rate")),
+        first_number(row.get("health"), 1),
+        first_number(row.get("distance_to_nearest_opponent"), 9999),
+    ))
+    enemies = sorted(active, key=lambda row: (
+        not bool(row.get("carrying_pawn_id")),
+        first_number(row.get("distance_to_nearest_opponent"), 9999),
+    ))
+    welfare = {row.get("id"): row for row in snapshot.get("colonists", [])}
+    allied_gear = sorted({str(row.get("weapon_def") or "unarmed") for row in fighters})
+    enemy_gear = sorted({str(row.get("weapon_def") or "unarmed") for row in enemies})
+    enemy_kinds = sorted({str(row.get("kind_def") or row.get("name") or "enemy") for row in enemies})
+    shooters = [row for row in available if row.get("has_ranged_weapon")]
+    covering_now = sum(
+        first_number(row.get("distance_to_nearest_opponent"), 9999)
+        <= first_number(row.get("weapon_range")) + 1
+        for row in shooters
+    )
+    def fighter(row: dict[str, Any]) -> str:
+        needs = welfare.get(row.get("id")) or {}
+        gear = allied_gear.index(str(row.get("weapon_def") or "unarmed"))
+        status = "/down" if row.get("is_downed") else "/mental_break" if row.get("is_in_mental_state") else ""
+        low_rest = "/tired" if first_number(needs.get("rest"), 1) < 0.5 else ""
+        return (f"{row.get('id')}:{round(first_number(row.get('health'), 1) * 100)}/"
+                f"{round(first_number(row.get('bleeding_rate')) * 100)}/{gear}/"
+                f"{round(first_number(row.get('weapon_range')))}/"
+                f"{round(first_number(row.get('distance_to_nearest_opponent'), 9999))}/"
+                f"{round(first_number(row.get('moving'), 1) * 100)}/"
+                f"{int(first_number(row.get('melee_skill')))}/"
+                f"{int(first_number(row.get('shooting_skill')))}/"
+                f"{round(first_number(row.get('armor_sharp')) * 100)}{status}{low_rest}")
+    def hostile(row: dict[str, Any]) -> str:
+        gear = enemy_gear.index(str(row.get("weapon_def") or "unarmed"))
+        kind = enemy_kinds.index(str(row.get("kind_def") or row.get("name") or "enemy"))
+        carrying = f"/carrying={row['carrying_pawn_id']}" if row.get("carrying_pawn_id") else ""
+        return (f"{row.get('id')}:{kind}/{round(first_number(row.get('health'), 1) * 100)}/{gear}/"
+                f"{round(first_number(row.get('weapon_range')))}/"
+                f"{round(first_number(row.get('distance_to_nearest_opponent'), 9999))}/"
+                f"{int(first_number(row.get('melee_skill')))}/"
+                f"{round(first_number(row.get('armor_sharp')) * 100)}{carrying}")
+    state: dict[str, Any] = {}
+    if role_target is not None:
+        state["role_target"] = role_target
+        state["roles_already_assigned"] = assigned_roles or {}
+    state.update({
+        "task": "Whole-squad combat",
+        "paused": bool(snapshot["game"].get("is_paused")),
+        "phase": "preparing" if active and all(combat_planner.hostile_is_preparing(row) for row in active) else "assault",
+        "forces": (f"{len(available)} allies, {sum(bool(row.get('has_ranged_weapon')) for row in available)} guns, "
+                   f"{sum(bool(row.get('weapon_def')) and not row.get('has_ranged_weapon') for row in available)} melee; "
+                   f"{len(active)} enemies; {sum(bool(row.get('is_downed')) for row in combat.get('colonists', []))} allies down"),
+        "covering_guns": f"{covering_now}/{len(shooters)} currently in firing range",
+        "ally_weapons": allied_gear,
+        "enemy_weapons": enemy_gear,
+        "enemy_kinds": enemy_kinds,
+        "enemy_jobs": sorted({str(row.get("current_job") or row.get("lord_toil_name") or "unknown") for row in active})[:5],
+        "fighter_format": "id:hp%/bleed%/weapon#/range/dist/move%/melee/shoot/armor%",
+        "hostile_format": "id:kind#/hp%/weapon#/range/dist/melee/armor%",
+        "fighters": [fighter(row) for row in fighters],
+        "hostiles": [hostile(row) for row in enemies],
+        "defenses": sorted({str(row.get("kind")) for row in combat.get("defenses", [])})[:5],
+        "tradeoff": "Fight wounded: may die. Withdraw: lose firepower, allies may die. Retreat: save squad, yield ground.",
+    })
+    tokenizer = getattr(agent, "tok", None)
+    if tokenizer is None:
+        return state
+    config = getattr(agent, "cfg", {}) or {}
+    budget = max(64, int(config.get("max_len", 512)) - int(config.get("head_max_len", 192)) - 8)
+    def fits() -> bool:
+        return len(tokenizer(json.dumps(state, ensure_ascii=False), add_special_tokens=False)["input_ids"]) <= budget
+    if fits():
+        return state
+    for fighter_limit, enemy_limit in ((8, 5), (5, 3), (3, 2), (1, 1)):
+        state["fighters"] = [fighter(row) for row in fighters[:fighter_limit]]
+        state["hostiles"] = [hostile(row) for row in enemies[:enemy_limit]]
+        if fits():
+            return state
+    compact = {
+        "task": "Combat: decide for all fighters",
+        "forces": state["forces"],
+        "covering_guns": state["covering_guns"],
+        "ally_weapons": state["ally_weapons"],
+        "enemy_weapons": state["enemy_weapons"],
+        "fighter_format": state["fighter_format"],
+        "fighters": [fighter(row) for row in fighters[:3]],
+        "hostiles": [hostile(row) for row in enemies[:2]],
+        "risk": "Injured fighters may die; withdrawal saves them but reduces firepower.",
+    }
+    if role_target is not None:
+        compact["role_target"] = role_target
+    state = compact
+    if fits():
+        return state
+    state.pop("ally_weapons", None)
+    state.pop("enemy_weapons", None)
+    state.pop("fighter_format", None)
+    state["fighters"] = [fighter(row) for row in fighters[:2]]
+    state["hostiles"] = [hostile(row) for row in enemies[:1]]
+    if fits():
+        return state
+    raise ValueError("Laya combat context exceeds its real token budget even after compacting")
+
+
+def ask_combat_choice(agent: Any, state: dict[str, Any], question_id: str,
+                      question: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Use the same bounded option protocol as development decisions."""
+    options = dict(question.get("criteria") or {})
+    # Test doubles without Laya's tokenizer keep their observable single call.
+    # Production always uses the bounded tournament when the list is long.
+    if len(options) > 6 and getattr(agent, "tok", None) is None:
+        raw = agent.predict(state, {question_id: question})
+        return str((raw.get("answers") or {}).get(question_id, {}).get("choice") or ""), raw
+    return ask_laya_choice(agent, state, question_id, str(question.get("instructions") or ""), options)
+
+
 def make_questions(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
     if snapshot["combat"]["hostiles"]:
         criteria = combat_planner.available_tactics(snapshot)
         fighters = [
             pawn for pawn in snapshot["combat"].get("colonists", [])
-            if not pawn.get("is_dead") and not pawn.get("is_downed") and first_number(pawn.get("health")) >= 0.72
+            if not pawn.get("is_dead") and not pawn.get("is_downed") and not pawn.get("is_in_mental_state")
         ]
         living_colonists = [pawn for pawn in snapshot["combat"].get("colonists", [])
                             if not pawn.get("is_dead") and not pawn.get("is_downed")]
@@ -474,26 +637,8 @@ def make_questions(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
         ready_shooters = [pawn for pawn in armed_shooters if first_number(pawn.get("weapon_range")) >= 25
                           and first_number(pawn.get("moving"), 1) >= 0.8]
         welfare = {pawn.get("id"): pawn for pawn in snapshot.get("colonists", [])}
-        rested = all(
-            first_number((welfare.get(pawn.get("id")) or {}).get("rest"), 1) >= 0.4
-            and first_number((welfare.get(pawn.get("id")) or {}).get("hunger"), 1) >= 0.35
-            and first_number(pawn.get("health")) >= 0.85
-            for pawn in ready_shooters
-        )
         hostile_rows = [row for row in snapshot["combat"]["hostiles"] if not row.get("is_dead") and not row.get("is_downed")]
-        hostile_text = " ".join(
-            f"{row.get('kind_def') or ''} {row.get('weapon_def') or ''}".lower() for row in hostile_rows
-        )
-        unsuitable_enemy = any(token in hostile_text for token in (
-            *combat_planner.MECH_TOKENS, *combat_planner.INSECT_TOKENS,
-            *combat_planner.EXPLOSIVE_TOKENS,
-        )) or any(row.get("has_ranged_weapon") or row.get("carrying_pawn_id") for row in hostile_rows)
-        can_strike = (len(ready_shooters) >= 2 and len(hostile_rows) <= len(ready_shooters)
-                      and rested and not unsuitable_enemy and all(
-                          first_number(pawn.get("distance_to_nearest_opponent"), 9999) > 55
-                          for pawn in living_colonists
-                      ))
-        far_assault = bool(hostile_rows) and not staging and not any(
+        far_assault = bool(hostile_rows) and not staging and not actively_fighting and not any(
             pawn.get("carrying_pawn_id") or "kidnap" in str(pawn.get("current_job") or "").lower()
             for pawn in hostile_rows
         ) and all(
@@ -508,9 +653,8 @@ def make_questions(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
             ) for pawn in hostile_rows
         )
         if staging:
-            criteria = {
-                "prepare_undrafted": "Raiders are still preparing: let colonists eat, sleep, treat wounds and build while monitoring movement.",
-            }
+            criteria["prepare_undrafted"] = "Raiders are preparing: undraft so fighters can eat, rest and work; a sudden assault may catch them unready."
+            criteria["hold_and_observe"] = "Observe staging raiders while keeping the current defense; drafted colonists will not rest or eat."
             free_ranged = any(weapon.get("is_ranged") for weapon in snapshot["combat"].get("available_weapons", []))
             unarmed_capable = any(
                 not pawn.get("has_ranged_weapon")
@@ -520,16 +664,21 @@ def make_questions(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
             )
             if free_ranged and unarmed_capable:
                 criteria["equip_ranged_weapon"] = "Equip suitable unarmed colonists with available ranged weapons before the raid advances."
-            if can_strike:
-                criteria["preemptive_strike"] = "Use mobile long-range shooters to provoke the staging raiders and withdraw to a prepared line."
-            else:
-                criteria["hold_and_observe"] = "Monitor the enemy without drafting or exhausting colonists until they approach."
+            if ready_shooters:
+                weak = len(ready_shooters) < len(hostile_rows)
+                tired = any(first_number((welfare.get(pawn.get("id")) or {}).get("rest"), 1) < 0.4
+                            or first_number((welfare.get(pawn.get("id")) or {}).get("hunger"), 1) < 0.35
+                            or first_number(pawn.get("health"), 1) < 0.85 for pawn in ready_shooters)
+                criteria["preemptive_strike"] = (
+                    "Provoke the staging enemy with long-range shooters; they may be isolated or counterattacked. "
+                    f"Shooters {len(ready_shooters)} vs enemies {len(hostile_rows)}; outnumbered={weak}; tired_or_wounded={tired}."
+                )
         elif far_assault:
-            criteria = {
-                "prepare_undrafted": "The assault is approaching but still beyond practical firing range; let colonists work and rest until it closes.",
-                "hold_and_observe": "Watch the approach without drafting the colony prematurely.",
-            }
-        elif armed_shooters:
+            criteria["prepare_undrafted"] = "Assault is beyond range: eat and rest now, but risk being caught before re-drafting."
+            criteria["hold_and_observe"] = "Watch the approach with current orders; drafted fighters cannot eat or sleep."
+        elif (armed_shooters and len(hostile_rows) == 1
+              and any("emp" not in str(pawn.get("weapon_def") or "").lower()
+                      for pawn in armed_shooters)):
             criteria["engage_ranged"] = "Legacy direct focus-fire order using every selected healthy armed shooter."
         if not staging and any(weapon.get("is_ranged") for weapon in snapshot["combat"].get("available_weapons", [])) and any(
             not pawn.get("has_ranged_weapon") and first_number(pawn.get("sight"), 1) >= 0.65
@@ -537,6 +686,15 @@ def make_questions(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
             and first_number(pawn.get("distance_to_nearest_opponent"), 0) > 20 for pawn in fighters
         ):
             criteria["equip_ranged_weapon"] = "Give suitable unarmed colonists nearby ranged weapons; they must survive the trip to pick them up."
+        if any(
+            pawn.get("tendable_now") and not pawn.get("is_downed") and not pawn.get("is_in_mental_state")
+            and first_number(pawn.get("moving"), 1) >= 0.65
+            for pawn in snapshot["combat"].get("colonists", [])
+        ):
+            criteria["emergency_self_tend"] = (
+                "A mobile injured colonist may leave the firing line to self-tend. Close enemies can kill them "
+                "during treatment; staying may cause death from bleeding, while withdrawal reduces team firepower."
+            )
         if not criteria:
             criteria = {
                 "hold_and_observe": "Keep civilians undrafted while monitoring the threat.",
@@ -625,21 +783,55 @@ def decide(agent: Any, snapshot: dict[str, Any], confidence_threshold: float) ->
         }
     questions = make_questions(snapshot)
     question_id = next(iter(questions))
-    raw = agent.predict(decision_state(snapshot), questions)
-    answer = raw["answers"][question_id]
-    choice = str(answer["choice"])
+    feasible = list(questions[question_id].get("criteria", {}))
+    visible_state = combat_model_context(agent, snapshot) if snapshot["combat"].get("hostiles") else decision_state(snapshot)
+    choice, raw = ask_combat_choice(agent, visible_state, question_id, questions[question_id])
+    raw["visible_state"] = visible_state
+    answer = (raw.get("answers") or {}).get(question_id) or {}
     confidence = first_number(answer.get("confidence"))
     reason = "Laya decision"
-    feasible = list(questions[question_id].get("criteria", {}))
     if choice not in feasible and feasible:
-        reason = f"Model returned infeasible choice {choice}; using {feasible[0]}"
-        choice = feasible[0]
+        raise ValueError(f"Laya returned infeasible combat choice {choice!r}")
     if confidence < confidence_threshold:
         reason = f"Confidence {confidence:.3f} is below threshold {confidence_threshold:.3f}"
         choice = "keep_current_plan"
     if choice not in SAFE_WORK_TYPES and choice not in COMBAT_CHOICES and choice != "keep_current_plan":
-        reason = f"Blocked non-whitelisted choice: {choice}"
-        choice = "keep_current_plan"
+        raise ValueError(f"Unsupported combat choice {choice!r}")
+    if choice == "melee_assault":
+        fighters = [row for row in snapshot["combat"].get("colonists", [])
+                    if not row.get("is_dead") and not row.get("is_downed") and not row.get("is_in_mental_state")]
+        swords = [row for row in fighters if row.get("weapon_def") and not row.get("has_ranged_weapon")]
+        guns = [row for row in fighters if row.get("has_ranged_weapon")]
+        covering = [row for row in guns if first_number(row.get("distance_to_nearest_opponent"), 9999)
+                    <= first_number(row.get("weapon_range")) + 1]
+        if swords and guns and not covering and min(
+            first_number(row.get("distance_to_nearest_opponent"), 9999) for row in swords
+        ) > 12:
+            confirmation = {
+                "type": "choice",
+                "instructions": (
+                    "The sword fighter would charge without any allied gun currently in firing range. "
+                    "Choose whether that immediate unsupported attack is still worth the risk, "
+                    "or first bring the guns into range while the sword fighter stays with them. "
+                    "Both options are valid decisions; consider enemy count, equipment, ally health and distance."
+                ),
+                "criteria": {
+                    "charge_now": (
+                        f"Attack immediately with {len(swords)} sword fighter(s); "
+                        f"0/{len(guns)} guns can cover them now. The attacker may be downed before help arrives."
+                    ),
+                    "bring_guns_forward": (
+                        f"Advance {len(guns)} shooters into range first and keep the sword fighter(s) near them; "
+                        "the enemy has more time to approach or attack."
+                    ),
+                },
+            }
+            selected, support_raw = ask_combat_choice(
+                agent, combat_model_context(agent, snapshot), "unsupported_charge", confirmation
+            )
+            raw["support_check"] = support_raw
+            if selected == "bring_guns_forward":
+                choice = "advance_to_range"
     selected_fighter_ids = None
     psycast_plan = None
     if choice in {"psycast_control", "psycast_support"}:
@@ -650,77 +842,259 @@ def decide(agent: Any, snapshot: dict[str, Any], confidence_threshold: float) ->
                 "instructions": "Choose the exact caster and ability. RIMAPI will re-check target validity, psyfocus, cooldown and neural heat before queueing a normal casting job.",
                 "criteria": {key: row["summary"] for key, row in options.items()},
             }}
-            psy_raw = agent.predict(decision_state(snapshot), psy_question)
-            selected = str(psy_raw.get("answers", {}).get("psycast_plan", {}).get("choice") or "")
+            selected, psy_raw = ask_combat_choice(agent, combat_model_context(agent, snapshot),
+                                                  "psycast_plan", psy_question["psycast_plan"])
             if selected in options:
                 psycast_plan = options[selected]
             raw["psycast"] = psy_raw
         if psycast_plan is None:
             choice = "hold_cover"
 
-    roster_choices = (set(combat_planner.TACTICS) - {"stand_down", "psycast_support"}) | {
-        "engage_ranged", "engage_melee", "draft_best_defender", "preemptive_strike",
-        "focus_mechanoids", "focus_insects",
+    medical_target_id = None
+    if choice == "emergency_self_tend":
+        patients = [pawn for pawn in snapshot["combat"].get("colonists", [])
+                    if pawn.get("tendable_now") and not pawn.get("is_downed") and not pawn.get("is_in_mental_state")
+                    and first_number(pawn.get("moving"), 1) >= 0.65
+                    ]
+        if len(patients) > 1:
+            medical_question = {"medical_target": {
+                "type": "choice",
+                "instructions": "Choose which colonist needs an immediate safe self-tend. Compare bleeding, mobility, health and enemy distance.",
+                "criteria": {str(int(pawn["id"])): (
+                    f"{pawn.get('name')}: health {first_number(pawn.get('health')):.2f}, "
+                    f"bleeding {first_number(pawn.get('bleeding_rate')):.2f}, "
+                    f"moving {first_number(pawn.get('moving'), 1):.2f}, "
+                    f"nearest enemy {first_number(pawn.get('distance_to_nearest_opponent')):.0f} cells"
+                ) for pawn in patients},
+            }}
+            selected, medical_raw = ask_combat_choice(agent, combat_model_context(agent, snapshot),
+                                                      "medical_target", medical_question["medical_target"])
+            medical_target_id = int(selected) if selected in medical_question["medical_target"]["criteria"] else None
+            raw["medical_target"] = medical_raw
+        elif patients:
+            medical_target_id = int(patients[0]["id"])
+
+    melee_role = None
+    melee_roles: dict[int, str] = {}
+    ranged_group_tactics = {
+        "hold_cover", "focus_fire", "firing_line", "spread_out", "kite", "backstep_fire",
+        "advance_to_range", "staggered_retreat", "killbox_hold", "wide_flank", "pincer",
+        "counter_snipe", "siege_harass", "drop_pod_encircle",
     }
-    if choice in roster_choices:
+    if choice in ranged_group_tactics or choice == "coordinate_melee_roles":
+        melee_fighters = [
+            pawn for pawn in snapshot["combat"].get("colonists", [])
+            if not pawn.get("is_dead") and not pawn.get("is_downed") and not pawn.get("is_in_mental_state")
+            and pawn.get("weapon_def") and not pawn.get("has_ranged_weapon")
+        ]
+        role_raw: dict[str, Any] = {}
+        has_shooters = any(pawn.get("has_ranged_weapon") and not pawn.get("is_dead")
+                           and not pawn.get("is_downed") and not pawn.get("is_in_mental_state")
+                           for pawn in snapshot["combat"].get("colonists", []))
+        for pawn in melee_fighters:
+            mobile = first_number(pawn.get("moving"), 1) >= 0.65
+            melee_options = {
+                ("guard_shooters" if has_shooters else "melee_hold_line"):
+                    "Stay with allies and intercept enemies that close in; this preserves the group but may let distant enemies attack first.",
+            }
+            if has_shooters:
+                melee_options["screen_melee"] = "Intercept nearby enemies to protect allies; this risks the fighter in a close fight."
+            if mobile:
+                melee_options["melee_assault"] = (
+                    "Attack the chosen enemy now. A long charge can expose this fighter to gunfire or stronger melee enemies; allies may cover them."
+                )
+                if first_number(pawn.get("distance_to_nearest_opponent"), 9999) <= 20:
+                    melee_options["lure_enemy"] = (
+                        "Draw the nearest enemy into allied range with short trap-free moves, staying close enough to keep pursuit. "
+                        "If the enemy ignores the lure, the fighter may contribute no damage while allies are exposed."
+                    )
+                melee_options["withdraw_and_regroup"] = (
+                    "Withdraw this fighter from danger. They may survive, but the remaining allies lose protection and may be overwhelmed."
+                )
+            question_id = f"melee_role_{int(pawn['id'])}"
+            melee_question = {question_id: {
+                "type": "choice",
+                "instructions": (
+                    f"Choose the role for {pawn.get('name') or pawn['id']} only. Every other controllable fighter also receives a role this cycle. "
+                    "Compare this fighter's health, armor, movement and position with the enemy count, health, weapons and ranges. "
+                    "A lure helps only if attackers can shoot the pursuer; an isolated charge can kill the attacker; "
+                    "retreat can save them but expose allies. No outcome is mandatory."
+                ),
+                "criteria": melee_options,
+            }}
+            role_target = {
+                "id": int(pawn["id"]),
+                "health": first_number(pawn.get("health")),
+                "armor": first_number(pawn.get("armor_sharp")),
+                "movement": first_number(pawn.get("moving"), 1),
+                "distance_to_enemy": first_number(pawn.get("distance_to_nearest_opponent"), 9999),
+                "weapon": pawn.get("weapon_def"),
+            }
+            role_state = combat_model_context(agent, snapshot, role_target=role_target, assigned_roles=melee_roles.copy())
+            selected_role, prediction = ask_combat_choice(agent, role_state, question_id, melee_question[question_id])
+            melee_roles[int(pawn["id"])] = selected_role if selected_role in melee_options else next(iter(melee_options))
+            role_raw[question_id] = prediction
+        if role_raw:
+            raw["melee_roles"] = role_raw
+
+    cover_tactic = None
+    if choice == "withdraw_and_regroup":
         eligible = [
             pawn for pawn in snapshot["combat"].get("colonists", [])
-            if not pawn.get("is_dead") and not pawn.get("is_downed") and first_number(pawn.get("health")) >= 0.72
+            if not pawn.get("is_dead") and not pawn.get("is_downed") and not pawn.get("is_in_mental_state")
+            and first_number(pawn.get("moving"), 1) >= 0.65
         ]
-        if choice in {"focus_fire", "engage_ranged", "preemptive_strike", "hold_cover", "firing_line", "spread_out", "kite", "wide_flank", "pincer", "counter_snipe", "siege_harass"}:
-            eligible = [pawn for pawn in eligible if pawn.get("has_ranged_weapon")]
-            if choice == "focus_fire":
-                eligible = [pawn for pawn in eligible if first_number(pawn.get("distance_to_nearest_opponent"), 9999)
-                            <= first_number(pawn.get("weapon_range")) + 1]
-        if choice in {"melee_block", "door_defense", "infestation_choke", "rush_ranged"}:
-            eligible = [pawn for pawn in eligible if pawn.get("weapon_def") and not pawn.get("has_ranged_weapon") and first_number(pawn.get("armor_sharp")) >= 0.4]
-        if choice in {"psycast_control", "psycast_support"}:
-            caster = (psycast_plan or {}).get("pawn_id")
-            eligible = [pawn for pawn in eligible if pawn.get("id") == caster]
-        has_medical_tradeoff = any(
-            pawn.get("health_conditions")
-            or first_number(pawn.get("manipulation"), 1.0) < 0.8
-            or first_number(pawn.get("moving"), 1.0) < 0.8
-            or first_number(pawn.get("sight"), 1.0) < 0.8
-            or first_number(pawn.get("pain")) > 0.25
-            for pawn in eligible
-        )
-        if len(eligible) > 1 or has_medical_tradeoff:
-            roster_questions: dict[str, dict[str, Any]] = {}
+        live_hostiles = [row for row in snapshot["combat"].get("hostiles", [])
+                         if not row.get("is_dead") and not row.get("is_downed")]
+        if len(eligible) > 1:
+            teams: dict[str, list[dict[str, Any]]] = {}
+            enemy_summary = "; ".join(
+                f"{row.get('kind_def') or row.get('name')} hp {first_number(row.get('health'), 1):.2f} "
+                f"weapon {row.get('weapon_def') or 'natural'}"
+                for row in live_hostiles[:6]
+            )
+
+            def add_team(members: list[dict[str, Any]]) -> None:
+                if members:
+                    key = "team_" + "_".join(str(int(pawn["id"])) for pawn in members)
+                    teams[key] = members
+
+            add_team(eligible)
+            for omitted in eligible:
+                add_team([pawn for pawn in eligible if pawn["id"] != omitted["id"]])
             for pawn in eligible:
-                context = (
-                    f"{pawn.get('name')}: Shooting {pawn.get('shooting_skill', 0)}, Melee {pawn.get('melee_skill', 0)}, "
-                    f"weapon {pawn.get('weapon_label') or 'none'}, health {pawn.get('health')}, pain {pawn.get('pain', 0)}, "
-                    f"moving {pawn.get('moving', 1)}, manipulation {pawn.get('manipulation', 1)}, sight {pawn.get('sight', 1)}, "
-                    f"traits {pawn.get('traits') or []}, conditions {pawn.get('health_conditions') or []}."
-                )
-                roster_questions[f"fighter_{int(pawn['id'])}"] = {
+                add_team([pawn])
+            for first, second in combinations(eligible, 2):
+                add_team([first, second])
+            if len(teams) > 1:
+                team_question = {"combat_team": {
                     "type": "choice",
-                    "instructions": context + " Decide whether this exact colonist should deploy for the already selected combat plan. A missing arm, low movement/sight, pain or poor weapon can justify reserve; Tough and strong combat skills can justify deploy.",
-                    "criteria": {"deploy": "Join the selected combat plan.", "reserve": "Remain undrafted for safety, rescue and home work."},
-                }
-            roster_raw = agent.predict(decision_state(snapshot), roster_questions)
-            selected_fighter_ids = [
-                int(question_id.removeprefix("fighter_"))
-                for question_id, answer_row in roster_raw.get("answers", {}).items()
-                if question_id.startswith("fighter_") and answer_row.get("choice") == "deploy"
-            ]
-            raw["roster"] = roster_raw
+                    "instructions": (
+                        f"Choose which fighters actually withdraw against {len(live_hostiles)} active enemies. "
+                        f"Enemies: {enemy_summary}. "
+                        "Everyone not in the withdrawal group will receive an explicit covering combat order. "
+                        "An injured fighter may die if kept in cover, but withdrawing too many can doom the others. "
+                        "Withdrawing all stops the colony's fire; leaving one cover fighter may sacrifice them to save others."
+                    ),
+                    "criteria": {
+                        key: (
+                            f"Withdraw {len(members)}; "
+                            f"covering: {', '.join(str(pawn.get('name') or pawn.get('id')) for pawn in eligible if pawn not in members) or 'nobody'}. "
+                            + "; ".join(
+                            f"{pawn.get('name')} health {first_number(pawn.get('health')):.2f}, "
+                            f"pain {first_number(pawn.get('pain')):.2f}, bleed {first_number(pawn.get('bleeding_rate')):.2f}, "
+                            f"move {first_number(pawn.get('moving'), 1):.2f}, "
+                            f"weapon {pawn.get('weapon_label') or pawn.get('weapon_def') or 'none'}, "
+                            f"conditions {pawn.get('health_conditions') or []}"
+                            for pawn in members
+                            )
+                        )
+                        for key, members in teams.items()
+                    },
+                }}
+                selected_key, roster_raw = ask_combat_choice(agent, combat_model_context(agent, snapshot),
+                                                             "combat_team", team_question["combat_team"])
+                selected_fighter_ids = [int(pawn["id"]) for pawn in teams.get(selected_key, eligible)]
+                raw["roster"] = roster_raw
+            else:
+                selected_fighter_ids = [int(pawn["id"]) for pawn in eligible]
+        elif eligible:
+            selected_fighter_ids = [int(eligible[0]["id"])]
+        covering = [pawn for pawn in snapshot["combat"].get("colonists", [])
+                    if not pawn.get("is_dead") and not pawn.get("is_downed") and not pawn.get("is_in_mental_state")
+                    and int(pawn.get("id", -1)) not in set(selected_fighter_ids or [])]
+        if covering:
+            cover_options: dict[str, str] = {}
+            if any(pawn.get("has_ranged_weapon") for pawn in covering):
+                cover_options["focus_fire"] = "Cover the withdrawal with concentrated gunfire; exposed shooters may be wounded."
+                cover_options["hold_cover"] = "Hold current firing positions and existing cover while others withdraw."
+                if any(first_number(pawn.get("distance_to_nearest_opponent"), 9999) < 12
+                       for pawn in covering):
+                    cover_options["backstep_fire"] = "Backstep from close enemies and keep firing while the group withdraws."
+            if any(pawn.get("weapon_def") and not pawn.get("has_ranged_weapon") for pawn in covering):
+                cover_options["screen_melee"] = "Use an armed melee screen to buy time; the screen may be sacrificed."
+            if any(pawn.get("weapon_def") and not pawn.get("has_ranged_weapon")
+                   and first_number(pawn.get("moving"), 1) >= 0.65 for pawn in covering):
+                cover_options["melee_assault"] = "Counterattack with the remaining sword fighters while the others withdraw; this risks losing the cover group."
+            if len(cover_options) > 1:
+                cover_question = {"cover_tactic": {"type": "choice",
+                    "instructions": "Choose how the remaining fighters cover the withdrawal. Compare their equipment, health, enemy distance and the risk of losing them.",
+                    "criteria": cover_options}}
+                chosen_cover, cover_raw = ask_combat_choice(agent, combat_model_context(agent, snapshot),
+                                                            "cover_tactic", cover_question["cover_tactic"])
+                cover_tactic = chosen_cover if chosen_cover in cover_options else next(iter(cover_options))
+                raw["cover"] = cover_raw
+            elif cover_options:
+                cover_tactic = next(iter(cover_options))
     return {
         "choice": choice, "confidence": confidence, "reason": reason, "raw": raw,
         "selected_fighter_ids": selected_fighter_ids,
+        "cover_tactic": cover_tactic,
+        "melee_role": melee_role,
+        "melee_roles": melee_roles,
         "psycast_plan": psycast_plan,
+        "medical_target_id": medical_target_id,
     }
 
 
 def combat_reserve_commands(snapshot: dict[str, Any], active_ids: set[int]) -> list[dict[str, Any]]:
-    """Make Laya's reserve/medical roster decision a real undraft order."""
-    return [
+    """Give omitted drafted fighters an explicit retreat instead of making them idle."""
+    omitted = [pawn for pawn in snapshot.get("combat", {}).get("colonists", [])
+               if pawn.get("id") is not None and not pawn.get("is_dead") and not pawn.get("is_in_mental_state")
+               and int(pawn["id"]) not in active_ids]
+    target_id = combat_planner.choose_default_target(snapshot, "withdraw_and_regroup")
+    if target_id is None:
+        return [
+            {"endpoint": "/api/v1/pawn/edit/status", "body": {"pawn_id": pawn["id"], "is_drafted": False}}
+            for pawn in omitted if pawn.get("is_drafted")
+        ]
+    mobile = [pawn for pawn in omitted if not pawn.get("is_downed")
+              and first_number(pawn.get("moving"), 1) >= 0.65
+              and first_number(pawn.get("distance_to_nearest_opponent"), 9999) < 18]
+    commands = []
+    if mobile and target_id is not None:
+        commands.append({"endpoint": "/api/v1/combat/tactic", "body": {
+            "map_id": snapshot["map"]["id"], "tactic": "withdraw_and_regroup",
+            "fighter_ids": [int(pawn["id"]) for pawn in mobile], "target_pawn_id": target_id,
+        }})
+    commands.extend(
         {"endpoint": "/api/v1/pawn/edit/status", "body": {"pawn_id": pawn["id"], "is_drafted": False}}
-        for pawn in snapshot.get("combat", {}).get("colonists", [])
-        if pawn.get("is_drafted") and pawn.get("id") is not None
-        and (int(pawn["id"]) not in active_ids or first_number(pawn.get("health")) < 0.72 or pawn.get("is_downed"))
-    ]
+        for pawn in omitted if pawn not in mobile and pawn.get("is_drafted")
+    )
+    return commands
+
+
+def melee_support_commands(snapshot: dict[str, Any], decision: dict[str, Any],
+                           active_ids: set[int], target_id: int | None) -> tuple[list[dict[str, Any]], set[int]]:
+    """Apply every model-assigned melee role during the same combat cycle."""
+    melee = [pawn for pawn in snapshot["combat"].get("colonists", [])
+             if not pawn.get("is_dead") and not pawn.get("is_downed") and not pawn.get("is_in_mental_state")
+             and pawn.get("weapon_def") and not pawn.get("has_ranged_weapon")
+             and int(pawn.get("id", -1)) not in active_ids]
+    if not melee or target_id is None:
+        return [], active_ids
+    assigned_roles = decision.get("melee_roles") or {}
+    default_role = "melee_hold_line" if decision.get("choice") == "coordinate_melee_roles" else "guard_shooters"
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for pawn in melee:
+        pawn_id = int(pawn["id"])
+        role = str(assigned_roles.get(pawn_id) or assigned_roles.get(str(pawn_id))
+                   or decision.get("melee_role") or default_role)
+        if role not in {"guard_shooters", "screen_melee", "melee_assault", "melee_hold_line",
+                        "lure_enemy", "withdraw_and_regroup"}:
+            role = default_role
+        if (role in {"melee_assault", "lure_enemy", "withdraw_and_regroup"}
+                and first_number(pawn.get("moving"), 1) < 0.65):
+            role = default_role
+        groups.setdefault(role, []).append(pawn)
+    commands = []
+    for role, pawns in groups.items():
+        commands.append({"endpoint": "/api/v1/combat/tactic", "body": {
+            "map_id": snapshot["map"]["id"], "tactic": role,
+            "fighter_ids": [int(pawn["id"]) for pawn in pawns], "target_pawn_id": target_id,
+        }})
+        active_ids.update(int(pawn["id"]) for pawn in pawns)
+    return commands, active_ids
 
 
 def plan_action(snapshot: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any]:
@@ -740,57 +1114,218 @@ def plan_action(snapshot: dict[str, Any], decision: dict[str, Any]) -> dict[str,
         return {"kind": "noop", "description": choice.replace("_", " ")}
     if choice == "stand_down":
         drafted = [c for c in snapshot["combat"]["colonists"] if c.get("is_drafted")]
+        commands = [
+            {"endpoint": "/api/v1/pawn/edit/status", "body": {"pawn_id": c["id"], "is_drafted": False}}
+            for c in drafted
+        ]
+        if snapshot["game"].get("is_paused"):
+            commands.append({"endpoint": "/api/v1/game/speed", "query": {"speed": 1}})
         return {
             "kind": "commands",
             "description": f"Undraft {len(drafted)} colonist(s)",
-            "commands": [
-                {"endpoint": "/api/v1/pawn/edit/status", "body": {"pawn_id": c["id"], "is_drafted": False}}
-                for c in drafted
-            ],
+            "commands": commands,
         }
+    if choice == "emergency_self_tend":
+        patient_id = decision.get("medical_target_id")
+        patient = next((pawn for pawn in snapshot["combat"].get("colonists", [])
+                        if pawn.get("id") == patient_id and pawn.get("tendable_now")
+                        and not pawn.get("is_downed") and not pawn.get("is_in_mental_state")
+                        and first_number(pawn.get("moving"), 1) >= 0.65), None)
+        if patient is None:
+            return {"kind": "noop", "description": "No mobile self-tend patient remains"}
+        commands = []
+        if patient.get("is_drafted"):
+            commands.append({"endpoint": "/api/v1/pawn/edit/status", "body": {
+                "pawn_id": patient_id, "is_drafted": False,
+            }})
+        commands.append({"endpoint": "/api/v1/pawn/medical/tend", "body": {
+            "patient_pawn_id": patient_id, "doctor_pawn_id": patient_id, "self_tend": True,
+        }})
+        if resume_command:
+            commands.append(resume_command)
+        return {"kind": "commands", "description": f"Emergency self-tend: {patient.get('name')}",
+                "commands": commands}
+    if choice == "withdraw_and_regroup":
+        colonists = [pawn for pawn in snapshot["combat"].get("colonists", [])
+                     if not pawn.get("is_dead") and not pawn.get("is_downed") and not pawn.get("is_in_mental_state")]
+        target_id = combat_planner.choose_default_target(snapshot, choice)
+        if target_id is None:
+            return {"kind": "noop", "description": "No active enemy remains to withdraw from"}
+        selected = decision.get("selected_fighter_ids")
+        withdrawing_ids = set(map(int, selected)) if selected is not None else {
+            int(pawn["id"]) for pawn in colonists if first_number(pawn.get("moving"), 1) >= 0.65
+        }
+        withdrawing = [pawn for pawn in colonists if int(pawn["id"]) in withdrawing_ids
+                       and first_number(pawn.get("moving"), 1) >= 0.65]
+        covering = [pawn for pawn in colonists if int(pawn["id"]) not in withdrawing_ids]
+        commands: list[dict[str, Any]] = []
+
+        def order(tactic: str, pawns: list[dict[str, Any]]) -> None:
+            if pawns:
+                commands.append({"endpoint": "/api/v1/combat/tactic", "body": {
+                    "map_id": snapshot["map"]["id"], "tactic": tactic,
+                    "fighter_ids": [int(pawn["id"]) for pawn in pawns],
+                    "target_pawn_id": target_id,
+                }})
+
+        order("withdraw_and_regroup", withdrawing)
+        cover_tactic = str(decision.get("cover_tactic") or "")
+        armed_cover = [pawn for pawn in covering if pawn.get("weapon_def")]
+        ranged_cover = [pawn for pawn in armed_cover if pawn.get("has_ranged_weapon")]
+        melee_cover = [pawn for pawn in armed_cover if not pawn.get("has_ranged_weapon")]
+        if cover_tactic in {"screen_melee", "melee_assault"}:
+            if cover_tactic == "melee_assault":
+                mobile_melee = [pawn for pawn in melee_cover if first_number(pawn.get("moving"), 1) >= 0.65]
+                order("melee_assault", mobile_melee)
+                order("guard_shooters", [pawn for pawn in melee_cover if pawn not in mobile_melee])
+            else:
+                order("screen_melee", melee_cover)
+            order("focus_fire", ranged_cover)
+        else:
+            active_tactic = cover_tactic if cover_tactic in {"focus_fire", "hold_cover", "backstep_fire"} else "focus_fire"
+            mobile_ranged = [pawn for pawn in ranged_cover if first_number(pawn.get("moving"), 1) >= 0.65]
+            if active_tactic == "backstep_fire":
+                order("backstep_fire", mobile_ranged)
+                order("focus_fire", [pawn for pawn in ranged_cover if pawn not in mobile_ranged])
+            else:
+                order(active_tactic, ranged_cover)
+            order("screen_melee", melee_cover)
+        order("civilian_retreat", [pawn for pawn in covering if not pawn.get("weapon_def")
+                                   and first_number(pawn.get("moving"), 1) >= 0.65])
+        commands.extend({"endpoint": "/api/v1/pawn/edit/status", "body": {
+            "pawn_id": pawn["id"], "is_drafted": False,
+        }} for pawn in covering if not pawn.get("weapon_def") and pawn.get("is_drafted")
+                        and first_number(pawn.get("moving"), 1) < 0.65)
+        if resume_command:
+            commands.append(resume_command)
+        return {"kind": "commands" if commands else "noop",
+                "description": f"Regroup {len(withdrawing)} fighter(s), cover with {len(covering)}",
+                "commands": commands}
+    if choice == "coordinate_melee_roles":
+        target_id = combat_planner.choose_default_target(snapshot, choice)
+        if target_id is None:
+            return {"kind": "noop", "description": "No active enemy remains for a coordinated melee plan"}
+        shooters = [pawn for pawn in snapshot["combat"].get("colonists", [])
+                    if not pawn.get("is_dead") and not pawn.get("is_downed")
+                    and not pawn.get("is_in_mental_state") and pawn.get("has_ranged_weapon")
+                    and first_number(pawn.get("manipulation"), 1) >= 0.65
+                    and first_number(pawn.get("sight"), 1) >= 0.65]
+        active_ids = {int(pawn["id"]) for pawn in shooters}
+        melee_commands, active_ids = melee_support_commands(snapshot, decision, active_ids, target_id)
+        commands = combat_reserve_commands(snapshot, active_ids)
+        if shooters:
+            commands.append({"endpoint": "/api/v1/combat/tactic", "body": {
+                "map_id": snapshot["map"]["id"], "tactic": "focus_fire",
+                "fighter_ids": [int(pawn["id"]) for pawn in shooters], "target_pawn_id": target_id,
+            }})
+        commands.extend(melee_commands)
+        if resume_command:
+            commands.append(resume_command)
+        return {"kind": "commands" if commands else "noop",
+                "description": f"Individual melee roles for {len(decision.get('melee_roles') or {})} fighter(s)",
+                "commands": commands}
     if choice in combat_planner.TACTICS:
         fighters = [
             pawn for pawn in snapshot["combat"].get("colonists", [])
-            if not pawn.get("is_dead") and not pawn.get("is_downed")
-            and first_number(pawn.get("health")) >= 0.72
+            if not pawn.get("is_dead") and not pawn.get("is_downed") and not pawn.get("is_in_mental_state")
         ]
         selected = decision.get("selected_fighter_ids")
         if selected is not None:
             selected_set = set(map(int, selected))
             fighters = [pawn for pawn in fighters if int(pawn.get("id", -1)) in selected_set]
         ranged_tactics = {
-            "hold_cover", "focus_fire", "firing_line", "spread_out", "kite",
+            "hold_cover", "focus_fire", "firing_line", "spread_out", "kite", "backstep_fire", "advance_to_range",
             "staggered_retreat", "killbox_hold", "wide_flank", "pincer",
             "counter_snipe", "siege_harass", "drop_pod_encircle",
         }
-        melee_tactics = {"melee_block", "door_defense", "infestation_choke", "rush_ranged"}
+        melee_tactics = {"melee_assault", "melee_hold_line", "screen_melee", "melee_block", "door_defense", "infestation_choke", "rush_ranged"}
         if choice in ranged_tactics:
             fighters = [pawn for pawn in fighters if pawn.get("has_ranged_weapon") and first_number(pawn.get("manipulation"), 1) >= 0.65 and first_number(pawn.get("sight"), 1) >= 0.65]
-            if choice == "focus_fire":
-                fighters = [pawn for pawn in fighters if first_number(pawn.get("distance_to_nearest_opponent"), 9999)
-                            <= first_number(pawn.get("weapon_range")) + 1]
             if choice == "counter_snipe":
                 fighters = [pawn for pawn in fighters if first_number(pawn.get("weapon_range")) >= 30]
         elif choice in melee_tactics:
-            fighters = [pawn for pawn in fighters if pawn.get("weapon_def") and not pawn.get("has_ranged_weapon") and first_number(pawn.get("armor_sharp")) >= 0.4 and first_number(pawn.get("moving"), 1) >= 0.8]
+            fighters = [pawn for pawn in fighters if pawn.get("weapon_def") and not pawn.get("has_ranged_weapon")
+                        and first_number(pawn.get("moving"), 1) >= (0.65 if choice in {"melee_assault", "melee_hold_line", "screen_melee"} else 0.8)
+                        and (choice in {"melee_assault", "melee_hold_line", "screen_melee"} or first_number(pawn.get("armor_sharp")) >= 0.4)]
         elif choice == "civilian_retreat":
             fighters = [pawn for pawn in fighters if first_number(pawn.get("moving"), 1) >= 0.65]
+        elif choice == "withdraw_and_regroup":
+            fighters = [pawn for pawn in fighters if first_number(pawn.get("moving"), 1) >= 0.65]
+        if choice == "backstep_fire":
+            fighters = [pawn for pawn in fighters if first_number(pawn.get("moving"), 1) >= 0.65]
+        if choice == "kite":
+            target_id = combat_planner.choose_default_target(snapshot, choice)
+            lures = [pawn for pawn in fighters
+                     if first_number(pawn.get("moving"), 1) >= 0.85
+                     and first_number(pawn.get("distance_to_nearest_opponent"), 9999) <= 16]
+            pairs = [
+                (lure, [pawn for pawn in fighters
+                        if pawn["id"] != lure["id"]
+                        and first_number(pawn.get("distance_to_nearest_opponent"), 9999)
+                        <= first_number(pawn.get("weapon_range")) + 12])
+                for lure in lures
+            ]
+            pairs = [(lure, support) for lure, support in pairs if support]
+            if not pairs:
+                # A partial roster must never turn coordinated kiting into a
+                # solo retreat that leaves the firing line exposed.
+                return plan_action(snapshot, {**decision, "choice": "focus_fire"})
+            lure, support = max(pairs, key=lambda pair: (
+                first_number(pair[0].get("moving"), 1),
+                first_number(pair[0].get("health")),
+                len(pair[1]),
+            ))
+            active_ids = {int(lure["id"])} | {int(pawn["id"]) for pawn in support}
+            melee_commands, active_ids = melee_support_commands(snapshot, decision, active_ids, target_id)
+            commands = combat_reserve_commands(snapshot, active_ids) + [
+                {"endpoint": "/api/v1/combat/tactic", "body": {
+                    "map_id": snapshot["map"]["id"], "tactic": "advance_to_range",
+                    "fighter_ids": [int(pawn["id"]) for pawn in support],
+                    "target_pawn_id": target_id,
+                }},
+                {"endpoint": "/api/v1/combat/tactic", "body": {
+                    "map_id": snapshot["map"]["id"], "tactic": "kite",
+                    "fighter_ids": [int(lure["id"])],
+                    "target_pawn_id": target_id,
+                }},
+            ] + melee_commands
+            if resume_command:
+                commands.append(resume_command)
+            return {"kind": "commands", "description": f"Kite with {lure.get('name')}; {len(support)} covering shooter(s)",
+                    "commands": commands}
+        target_id = combat_planner.choose_default_target(snapshot, choice)
+        active_ids = {int(pawn["id"]) for pawn in fighters}
+        melee_commands = []
+        if choice in ranged_tactics:
+            melee_commands, active_ids = melee_support_commands(snapshot, decision, active_ids, target_id)
+        elif choice in melee_tactics:
+            covering_shooters = [pawn for pawn in snapshot["combat"].get("colonists", [])
+                                if not pawn.get("is_dead") and not pawn.get("is_downed")
+                                and not pawn.get("is_in_mental_state") and pawn.get("has_ranged_weapon")
+                                and first_number(pawn.get("manipulation"), 1) >= 0.65
+                                and first_number(pawn.get("sight"), 1) >= 0.65]
+            if covering_shooters and target_id is not None:
+                melee_commands.append({"endpoint": "/api/v1/combat/tactic", "body": {
+                    "map_id": snapshot["map"]["id"], "tactic": "focus_fire",
+                    "fighter_ids": [int(pawn["id"]) for pawn in covering_shooters],
+                    "target_pawn_id": target_id,
+                }})
+                active_ids.update(int(pawn["id"]) for pawn in covering_shooters)
         reserve_commands = [] if choice in {"psycast_control", "psycast_support"} else combat_reserve_commands(
-            snapshot, {int(pawn["id"]) for pawn in fighters}
+            snapshot, active_ids
         )
         if not fighters:
-            commands = reserve_commands + ([resume_command] if resume_command else [])
+            commands = reserve_commands + melee_commands + ([resume_command] if resume_command else [])
             return {"kind": "commands", "description": "Withdraw vulnerable fighters", "commands": commands} if commands else {
                 "kind": "noop", "description": "No healthy fighter was selected for the tactic"
             }
-        target_id = combat_planner.choose_default_target(snapshot, choice)
         if choice == "focus_fire" and all(
             pawn.get("is_drafted") and pawn.get("current_job") == "AttackStatic"
             and pawn.get("current_job_target_id") == target_id for pawn in fighters
         ):
-            commands = reserve_commands + ([resume_command] if resume_command else [])
+            commands = reserve_commands + melee_commands + ([resume_command] if resume_command else [])
             if commands:
-                return {"kind": "commands", "description": "Continue focus fire; withdraw reserves", "commands": commands}
+                return {"kind": "commands", "description": "Continue focus fire with simultaneous support", "commands": commands}
             return {"kind": "noop", "description": "Existing focus-fire order is still active"}
         body: dict[str, Any] = {
             "map_id": snapshot["map"]["id"],
@@ -810,7 +1345,7 @@ def plan_action(snapshot: dict[str, Any], decision: dict[str, Any]) -> dict[str,
                 allies = [pawn for pawn in snapshot["combat"].get("colonists", []) if not pawn.get("is_dead")]
                 if allies:
                     body["ability_target_pawn_id"] = int(min(allies, key=lambda pawn: first_number(pawn.get("health"), 1))["id"])
-        commands = reserve_commands + [{"endpoint": "/api/v1/combat/tactic", "body": body}]
+        commands = reserve_commands + [{"endpoint": "/api/v1/combat/tactic", "body": body}] + melee_commands
         if resume_command:
             commands.append(resume_command)
         return {
@@ -834,7 +1369,7 @@ def plan_action(snapshot: dict[str, Any], decision: dict[str, Any]) -> dict[str,
     if choice in {"engage_ranged", "engage_melee", "draft_best_defender", "equip_ranged_weapon", "equip_melee_weapon", "preemptive_strike", "equip_emp_weapon", "focus_mechanoids", "focus_insects"}:
         fighters = [
             c for c in snapshot["combat"]["colonists"]
-            if not c.get("is_dead") and not c.get("is_downed") and first_number(c.get("health")) >= 0.72
+            if not c.get("is_dead") and not c.get("is_downed") and not c.get("is_in_mental_state")
         ]
         if decision.get("selected_fighter_ids") is not None:
             selected = set(map(int, decision.get("selected_fighter_ids") or []))
@@ -849,14 +1384,14 @@ def plan_action(snapshot: dict[str, Any], decision: dict[str, Any]) -> dict[str,
                 "kind": "noop", "description": "No eligible fighter or hostile target"
             }
         ranged = choice in {"engage_ranged", "equip_ranged_weapon", "preemptive_strike", "equip_emp_weapon", "focus_mechanoids", "focus_insects"}
-        if ranged:
+        if ranged and choice not in {"equip_ranged_weapon", "equip_emp_weapon"}:
             armed = [c for c in fighters if c.get("has_ranged_weapon")]
             if armed:
                 fighters = armed
         if choice == "preemptive_strike":
             fighters = [c for c in fighters if c.get("has_ranged_weapon") and first_number(c.get("weapon_range")) >= 25 and first_number(c.get("moving"), 1) >= 0.8]
-            if len(fighters) < 2:
-                return {"kind": "noop", "description": "No coordinated long-range strike team is available"}
+            if not fighters:
+                return {"kind": "noop", "description": "No mobile long-range striker is available"}
         reserve_commands = combat_reserve_commands(snapshot, {int(pawn["id"]) for pawn in fighters})
         ranked_fighters = sorted(
             fighters,
@@ -885,7 +1420,12 @@ def plan_action(snapshot: dict[str, Any], decision: dict[str, Any]) -> dict[str,
                 return {"kind": "noop", "description": "No suitable free weapon is available"}
             ax = first_number((actor.get("position") or {}).get("x"))
             az = first_number((actor.get("position") or {}).get("z"))
-            unarmed = [pawn for pawn in ranked_fighters if not pawn.get("has_ranged_weapon")] if ranged else ranked_fighters
+            if choice == "equip_ranged_weapon":
+                unarmed = [pawn for pawn in ranked_fighters if not pawn.get("has_ranged_weapon")]
+            elif choice == "equip_emp_weapon":
+                unarmed = [pawn for pawn in ranked_fighters if "emp" not in str(pawn.get("weapon_def") or "").lower()]
+            else:
+                unarmed = ranked_fighters
             commands: list[dict[str, Any]] = []
             assignments: list[str] = []
             remaining = list(weapons)

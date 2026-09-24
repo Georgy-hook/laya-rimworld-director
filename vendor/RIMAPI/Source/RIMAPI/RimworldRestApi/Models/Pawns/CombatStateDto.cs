@@ -23,6 +23,7 @@ namespace RIMAPI.Models
         public bool IsHostile { get; set; }
         public bool IsDrafted { get; set; }
         public bool IsDowned { get; set; }
+        public bool IsInMentalState { get; set; }
         public bool IsDead { get; set; }
         public float Health { get; set; }
         public PositionDto Position { get; set; }
@@ -39,6 +40,8 @@ namespace RIMAPI.Models
         public string Gender { get; set; }
         public int BiologicalAge { get; set; }
         public float BleedingRate { get; set; }
+        public bool TendableNow { get; set; }
+        public bool SelfTendAllowed { get; set; }
         public float Consciousness { get; set; }
         public float Moving { get; set; }
         public float Manipulation { get; set; }

@@ -190,6 +190,7 @@ def generate_house_candidates(
     powered: bool,
     climate: str,
     seed: int = 0,
+    entry_side: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Generate 24 deterministic houses (six styles × four layouts)."""
     index = catalog_index(building_catalog)
@@ -204,7 +205,8 @@ def generate_house_candidates(
             rng = random.Random(seed * 1009 + style_index * 101 + variant * 17)
             width = base_width + (1 if variant in {2, 3} else 0)
             height = base_height + (1 if variant in {1, 3} else 0)
-            door_side = ("south", "east", "north", "west")[(variant + style_index) % 4]
+            door_side = entry_side if entry_side in {"south", "east", "north", "west"} else (
+                "south", "east", "north", "west")[(variant + style_index) % 4]
             edge_length = width if door_side in {"north", "south"} else height
             door_offset = rng.randint(2, max(2, edge_length - 3))
             items = _shell(width, height, material, door_side, door_offset)
@@ -233,13 +235,17 @@ def generate_house_candidates(
             area = (width - 2) * (height - 2)
             floor_def = _floor_for_material(material, finished_research, item_counts, area) if style in {"artisan", "couple", "family"} else None
             layout = blueprint(items, width, height, _interior_floor(width, height, floor_def))
+            layout = resolve_layout_materials(layout, index, item_counts)
+            if layout is None:
+                continue
             option_id = f"house_{style}_{variant + 1}"
             result[option_id] = {
                 "id": option_id,
                 "program": "residence",
                 "style": style,
                 "name": f"{style} house {variant + 1}",
-                "summary": f"{description}; {width}×{height}; door {door_side}; {bed_def}; {floor_def or 'natural floor'}; {_light_def(index, powered)}",
+                "summary": f"{description}; {width}×{height}; door {door_side} at {door_offset}; "
+                           f"wall {material}; {bed_def}; {floor_def or 'natural floor'}; {_light_def(index, powered)}",
                 "width": width,
                 "height": height,
                 "layout": layout,
@@ -259,10 +265,16 @@ def _furnished_room(
     climate: str,
     variant: int,
     context: dict[str, Any],
+    seed: int,
 ) -> dict[str, Any]:
     index = catalog_index(catalog)
-    door_side = ("south", "east", "north")[variant % 3]
-    items = _shell(width, height, material, door_side, (width if door_side in {"south", "north"} else height) // 2)
+    requested_side = str(context.get("entry_side") or "")
+    door_side = requested_side if requested_side in {"south", "east", "north", "west"} else (
+        "south", "east", "north")[variant % 3]
+    edge_length = width if door_side in {"south", "north"} else height
+    rng = random.Random(seed * 1009 + sum(map(ord, program)) * 101 + variant * 17)
+    door_offset = rng.randint(2, max(2, edge_length - 3))
+    items = _shell(width, height, material, door_side, door_offset)
     items.append(building(_light_def(index, powered), width - 2, height - 2))
     floors: list[dict[str, Any]] = []
     interior_area = (width - 2) * (height - 2)
@@ -318,7 +330,7 @@ def _furnished_room(
             add("Brazier", x, height - 3, stuff=material)
             add("Column", x, 3, stuff=material)
         for x in range(2, width - 2, 3):
-            add("Drape", x, height - 1, stuff=material, rotation=2)
+            add("Drape", x, height - 2, stuff=material, rotation=2)
         floor_def = _floor_for_material(material, finished, item_counts, interior_area)
         floors = _interior_floor(width, height, floor_def)
     elif program in {"workshop", "factory"}:
@@ -343,7 +355,7 @@ def _furnished_room(
         add(bench, 2, height // 2, stuff="Steel" if bench == "HiTechResearchBench" else material, rotation=2)
         if bench == "HiTechResearchBench":
             add("MultiAnalyzer", width - 3, height // 2)
-        add("Shelf", width - 2, 2, stuff=material, rotation=1)
+        add("Shelf", width - 3, 2, stuff=material, rotation=1)
         floor_def = "SterileTile" if "SterileMaterials" in finished and int(item_counts.get("Silver") or 0) >= interior_area * 12 + 300 else None
         floors = _interior_floor(width, height, floor_def)
     elif program == "storage":
@@ -374,7 +386,16 @@ def _furnished_room(
         add("SchoolDesk", width // 2, height - 4, stuff="WoodLog", rotation=2)
         add("ToyBox", 2, height - 2, stuff="WoodLog")
     elif program == "freezer":
-        add("Cooler", width - 1, height // 2, rotation=1)
+        # Cooler occupies the exterior wall opening, not the same cell as a
+        # second wall or the model-selected entrance blueprint.
+        cooler_z = height // 2
+        if any(item["def_name"] == "Door" and item["rel_x"] == width - 1
+               and item["rel_z"] == cooler_z for item in items):
+            cooler_z -= 1
+        items = [item for item in items if not (
+            item["def_name"] == "Wall" and item["rel_x"] == width - 1 and item["rel_z"] == cooler_z
+        )]
+        add("Cooler", width - 1, cooler_z, rotation=1)
         for x in range(2, width - 2, 3):
             for z in range(2, height - 2, 3):
                 add("Shelf", x, z, stuff=material)
@@ -427,13 +448,16 @@ def _defense_variant(material: str, variant: int, index: dict[str, dict[str, Any
 
 def generate_program_variants(program: str, context: dict[str, Any], *, seed: int = 0) -> dict[str, dict[str, Any]]:
     catalog = context.get("building_catalog") or []
+    if program == "freezer" and not _available(catalog_index(catalog), "Cooler"):
+        return {}
     finished = set(map(str, context.get("finished_research") or []))
     item_counts = context.get("item_counts") or {}
     material = str(context.get("material") or "WoodLog")
     powered = bool(context.get("powered"))
     climate = str(context.get("climate") or "temperate")
     if program == "residence":
-        return generate_house_candidates(material, catalog, finished, item_counts, powered=powered, climate=climate, seed=seed)
+        return generate_house_candidates(material, catalog, finished, item_counts, powered=powered,
+                                         climate=climate, seed=seed, entry_side=str(context.get("entry_side") or ""))
 
     sizes = {
         "residential_compound": [(13, 10), (15, 11), (17, 12)],
@@ -470,8 +494,11 @@ def generate_program_variants(program: str, context: dict[str, Any], *, seed: in
     for variant, (width, height) in enumerate(sizes):
         layout = _defense_variant(material, variant, index) if program == "defense" else _furnished_room(
             program, width, height, material, catalog, finished, item_counts,
-            powered, climate, variant, context,
+            powered, climate, variant, context, seed,
         )
+        layout = resolve_layout_materials(layout, index, item_counts)
+        if layout is None:
+            continue
         option_id = f"{program}_{variant + 1}"
         defs = Counter(row["def_name"] for row in layout["buildings"])
         highlights = ", ".join(f"{name}×{count}" for name, count in defs.items() if name not in {"Wall", "Door", "PowerConduit"})
@@ -480,11 +507,91 @@ def generate_program_variants(program: str, context: dict[str, Any], *, seed: in
             "program": program,
             "style": ("compact", "standard", "expanded")[min(variant, 2)],
             "name": f"{PROGRAM_CATALOG.get(program, {}).get('label', program)} {variant + 1}",
-            "summary": f"{width}×{height}; {highlights or 'functional shell'}; material {material}; light included",
+            "summary": f"{width}×{height}; {highlights or 'functional shell'}; wall {material}; "
+                       f"entry {context.get('entry_side') or 'generated'}; light included",
             "width": width,
             "height": height,
             "layout": layout,
         }
+    return result
+
+
+def estimated_stuff_cost(layout: dict[str, Any], building_catalog: list[dict[str, Any]]) -> dict[str, int]:
+    """Estimate stuff, fixed ingredients and known floors before offering a plan."""
+    index = catalog_index(building_catalog)
+    fallback = {"Wall": 5, "Door": 25, "AnimalFlap": 10, "Barricade": 5}
+    cost: Counter[str] = Counter()
+    for item in layout.get("buildings") or []:
+        definition = str(item.get("def_name") or "")
+        catalog_row = index.get(definition) or {}
+        material = str(item.get("stuff_def_name") or "")
+        if material:
+            amount = int(catalog_row.get("cost_stuff_count") or fallback.get(definition, 0))
+            cost[material] += max(0, amount)
+        for ingredient in catalog_row.get("cost_list") or []:
+            resource = str(ingredient.get("thing_def") or "")
+            if resource:
+                cost[resource] += max(0, int(ingredient.get("count") or 0))
+    floor_costs = {
+        "WoodPlankFloor": {"WoodLog": 3},
+        "MetalTile": {"Steel": 7},
+        "SterileTile": {"Steel": 3, "Silver": 12},
+    }
+    for tile in layout.get("floors") or []:
+        definition = str(tile.get("def_name") or "")
+        ingredients = floor_costs.get(definition)
+        if ingredients is None and definition.startswith("Tile"):
+            ingredients = {f"Blocks{definition.removeprefix('Tile')}": 4}
+        for resource, amount in (ingredients or {}).items():
+            cost[resource] += amount
+    return dict(cost)
+
+
+def layout_anchor_conflicts(layout: dict[str, Any]) -> list[tuple[int, int]]:
+    """Reject obviously overlapping or out-of-bounds blueprint anchors.
+
+    The engine remains authoritative for multi-cell footprints and modded
+    placement rules; this check catches errors in our own generated plans.
+    """
+    width, height = int(layout.get("width") or 0), int(layout.get("height") or 0)
+    occupied: set[tuple[int, int]] = set()
+    conflicts: list[tuple[int, int]] = []
+    for item in layout.get("buildings") or []:
+        cell = (int(item.get("rel_x") or 0), int(item.get("rel_z") or 0))
+        if cell in occupied or not (0 <= cell[0] < width and 0 <= cell[1] < height):
+            conflicts.append(cell)
+        occupied.add(cell)
+    return conflicts
+
+
+def affordable_variants(variants: dict[str, dict[str, Any]], context: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Keep layouts whose known material costs fit stock plus modest reserves."""
+    stock = context.get("item_counts") or {}
+    catalog = context.get("building_catalog") or []
+    affordable: dict[str, dict[str, Any]] = {}
+    for key, variant in variants.items():
+        if layout_anchor_conflicts(variant["layout"]):
+            continue
+        costs = estimated_stuff_cost(variant["layout"], catalog)
+        if all(int(stock.get(material) or 0) >= amount + (
+                   80 if material == "WoodLog" else 50 if material.startswith("Blocks") else
+                   100 if material == "Steel" else 1 if material.startswith("Component") else 0)
+               for material, amount in costs.items()):
+            affordable[key] = {**variant, "estimated_stuff_cost": costs,
+                               "summary": f"{variant['summary']}; estimated materials {costs}"}
+    return affordable
+
+
+def affordable_material_options(program: str, context: dict[str, Any],
+                                material_options: dict[str, str], *, seed: int = 0) -> dict[str, str]:
+    """Offer Laya only wall materials with at least one buildable layout."""
+    result = {}
+    for material, description in material_options.items():
+        trial = {**context, "material": material}
+        variants = affordable_variants(generate_program_variants(program, trial, seed=seed), trial)
+        if variants:
+            minimum = min(variant["estimated_stuff_cost"].get(material, 0) for variant in variants.values())
+            result[material] = f"{description}; smallest plan needs about {minimum} units plus reserve"
     return result
 
 
@@ -613,18 +720,45 @@ def select_building_stuff(
 
     def compatible(name: str) -> bool:
         lowered = name.lower()
-        if not categories:
-            return True
+        if name == "Jade":
+            return not categories or any("stone" in category or "stony" in category for category in categories)
         if name == "WoodLog":
-            return any("wood" in category for category in categories)
+            return not categories or any("wood" in category for category in categories)
         if name in {"Steel", "Plasteel", "Gold", "Silver", "Uranium"}:
-            return any("metal" in category for category in categories)
+            return not categories or any("metal" in category for category in categories)
         if lowered.startswith("blocks"):
-            return any("stone" in category or "stony" in category for category in categories)
-        return True
+            return not categories or any("stone" in category or "stony" in category for category in categories)
+        if name in {"Cloth", "DevilstrandCloth", "Hyperweave", "Synthread"} or "leather" in lowered or "wool" in lowered:
+            return not categories or any("fabric" in category or "textile" in category for category in categories)
+        # This catalog does not expose StuffCategoryDefs for arbitrary modded
+        # materials. Never mistake components or food for construction stuff.
+        return False
 
-    candidates = [preferred, "WoodLog", "Steel", "BlocksSandstone", "BlocksGranite", "BlocksLimestone", "BlocksSlate", "BlocksMarble", "Plasteel"]
+    candidates = [preferred, "WoodLog", "Steel", "BlocksSandstone", "BlocksGranite", "BlocksLimestone", "BlocksSlate", "BlocksMarble", "Plasteel",
+                  *sorted(item_counts, key=lambda name: -int(item_counts.get(name) or 0))]
     for name in dict.fromkeys(value for value in candidates if value):
         if compatible(name) and int(item_counts.get(name) or 0) >= amount + reserve:
             return name
     return None
+
+
+def resolve_layout_materials(layout: dict[str, Any], catalog: dict[str, dict[str, Any]],
+                             item_counts: dict[str, Any]) -> dict[str, Any] | None:
+    """Choose compatible stuff for each building from the live game catalog."""
+    if not catalog:
+        return layout
+    resolved_items = []
+    for item in layout.get("buildings") or []:
+        row = catalog.get(str(item.get("def_name") or "")) or {}
+        if int(row.get("cost_stuff_count") or 0) <= 0:
+            resolved_items.append(item)
+            continue
+        material = select_building_stuff(row, item_counts, str(item.get("stuff_def_name") or ""))
+        if not material:
+            return None
+        if item.get("def_name") in {"Wall", "Door", "AnimalFlap", "Barricade"} and material != item.get("stuff_def_name"):
+            # The wall palette was chosen by Laya. Never silently substitute
+            # a different shell material while resolving secondary furniture.
+            return None
+        resolved_items.append({**item, "stuff_def_name": material})
+    return {**layout, "buildings": resolved_items}

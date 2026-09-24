@@ -1,3 +1,13 @@
+# 0.0.4 — Laya-directed choices, squad combat and the first promo
+
+- Updated the local Laya SDK pin to 0.3.7. Decision input is checked against the actual tokenizer; large option sets use bounded comparisons so late options remain reachable, and one-option questions are resolved without calling the model.
+- Kept Laya responsible for strategic trade-offs while the bridge validates live IDs, costs and normal-game commands. Current needs, risks and recent outcomes reach the model in compact context; decisions and relative option weights are recorded for inspection. The root checkpoint is **not** trained for reliable RimWorld play, and displayed weights are not success probabilities.
+- Expanded combat to 36 situational tactics, including mixed melee/ranged groups, per-fighter melee roles, bounded kiting, short trap-free advances into firing range and regrouping. The model sees the opposing force and the risks of retreating or leaving fighters exposed; group orders and post-combat care have additional deterministic coverage.
+- Extended procedural construction choices with verified wall materials, entrance direction, room character, resource and component costs, and seeded variations. The selected design is retained for execution instead of silently substituting a different plan.
+- Added local decision feedback in the GUI for future training data; submitting a correction does not retrain the current checkpoint. Clarified the English in-game HUD and kept unequal yellow bars tied to actual model output.
+- Added a 56-second promotional montage, four GIF previews in the README, the five original footage clips as optional release assets, and an honest architecture/evaluation document.
+- 153 Python tests passed; the GUI asset validator passed, the updated C# RIMAPI build finished with zero warnings/errors, and fresh PyInstaller/Inno Setup packages were produced. This is not an exhaustive live-game combat benchmark. Autonomy is still experimental: use a copied save, and do not assume these improvements guarantee survival or victory.
+
 # 0.0.3 — First-run model download and raid-response fixes
 
 - The configuration assistant now downloads the required public root Laya checkpoint during setup. A missing cache is also recovered on launch; an unavailable network or incomplete download produces an explicit error. Model weights remain outside the installer and run locally after download.

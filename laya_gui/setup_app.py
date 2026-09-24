@@ -93,7 +93,7 @@ class SetupWindow(tk.Tk):
             self.withdraw()
         self.language = "ru"
         self.events: queue.Queue[tuple[str, str]] = queue.Queue()
-        self.title(f"{PRODUCT_NAME} 0.0.3 — Setup")
+        self.title(f"{PRODUCT_NAME} 0.0.4 — Setup")
         self.geometry("980x700")
         self.resizable(False, False)
         self.configure(bg=COLORS["window"])

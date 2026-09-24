@@ -1,6 +1,6 @@
 # GUI architecture
 
-The 0.0.3 RimWorld Autopilot control center is intentionally separate from the colony controller. `autopilot_control.py` is the public launcher (`laya_control.py` remains compatible); the implementation lives in `laya_gui/`:
+The 0.0.4 RimWorld Autopilot control center is intentionally separate from the colony controller. `autopilot_control.py` is the public launcher (`laya_control.py` remains compatible); the implementation lives in `laya_gui/`:
 
 - `app.py` composes the five user pages and animated navigation shell;
 - `theme.py` owns semantic dark-theme tokens, typography, shadows, focus-visible buttons, rounded scrollbars, scrollable pages and reusable cards;
@@ -27,15 +27,17 @@ The GUI writes `autopilot-preferences.json`. Installed builds keep writable sett
 
 Weights guide ordering and model context. They cannot override emergency gates, missing research/resources, invalid targets or API safety checks. “Do not begin unprovoked attacks” additionally removes settlement raids from the feasible candidate set.
 
-Normal logging keeps compact decisions, outcomes and probability paths. Technical logging additionally records the complete development snapshot/details; combat logging keeps full snapshots only in technical mode.
+Normal logging keeps the visible compact model context, compared options, decisions and outcomes. Technical logging additionally records the complete development snapshot/details; combat logging keeps full snapshots only in technical mode. Laya does not emit a textual chain of thought.
 
-The director writes a separate UTC heartbeat with its PID and current state. The GUI reports loading, waiting for a colony, running, decision errors and an unresponsive process independently; an old but still-live PID can no longer masquerade as a healthy autopilot. The HUD preference is read on every publication, so hiding it takes effect without stopping Laya. Compact mode renders a smaller RimWorld panel with up to five thin yellow probability bars. High-contrast labels and percentages sit above each bar, whose width is the model's real probability rather than an equalized decorative value.
+On the History page, **Rate decision** records your corrected choice and an optional explanation in a local feedback file. This creates labelled examples for later training; it does not retrain or change the running model. A full diagnostic export includes the feedback file.
+
+The director writes a separate UTC heartbeat with its PID and current state. The GUI reports loading, waiting for a colony, running, decision errors and an unresponsive process independently; an old but still-live PID can no longer masquerade as a healthy autopilot. The HUD preference is read on every publication, so hiding it takes effect without stopping Laya. Compact mode renders a smaller RimWorld panel with up to five thin yellow bars. High-contrast labels and percentages sit above each bar. The widths show relative model weights, not the likelihood of a successful game outcome; these weights have not been calibrated on RimWorld data.
 
 All calls into the Laya decision model pass through one guard. Questions with exactly one feasible answer are accepted deterministically and recorded with probability 1.0 without invoking the model; questions with no feasible answer are rejected as planner errors. Laya therefore receives only genuine decisions with at least two alternatives.
 
 ## Installer and uninstaller
 
-`installer/RimWorld-Autopilot.iss` produces the public `RimWorld-Autopilot-0.0.3-Setup.exe`. It uses Inno Setup's modern dynamic Windows 11 style, follows the system light/dark preference, displays project-local portrait artwork, requests administrator rights for the Program Files destination and registers the normal Windows uninstaller. It:
+`installer/RimWorld-Autopilot.iss` produces the public `RimWorld-Autopilot-0.0.4-Setup.exe`. It uses Inno Setup's modern dynamic Windows 11 style, follows the system light/dark preference, displays project-local portrait artwork, requests administrator rights for the Program Files destination and registers the normal Windows uninstaller. It:
 
 1. chooses the Program Files destination and optional desktop shortcut;
 2. copies the application, bilingual UI and complete local artwork set;
@@ -45,6 +47,6 @@ All calls into the Laya decision model pass through one guard. Questions with ex
 6. creates `.venv`, installs `requirements.txt`, downloads the root Laya model, backs up/replaces `Mods/RIMAPI` and writes local configuration;
 7. deletes the temporary assistant as setup exits.
 
-The installer does not request an API key, start RimWorld, alter saves or enable mods without the player. `unins000.exe` is registered in Windows Installed apps and removes application files and shortcuts. Writable LocalAppData and the game mod are preserved deliberately to avoid destructive surprise.
+The installer does not request an API key, start RimWorld, alter saves or enable mods without the player. `unins000.exe` is registered in Windows Installed apps and removes files installed by Setup and its shortcuts. Writable LocalAppData and the game mod are preserved deliberately to avoid destructive surprise. The assistant also generates `.venv` and `rimworld-autopilot.json` in the selected application directory after Setup has registered its file list; the uninstaller does not track these, so they may remain and should be reviewed before manual removal.
 
-`Build-GUI.ps1` reproduces the two internal unsigned Windows binaries, assembles `dist/rimworld-autopilot-0.0.3.zip`, converts the ImageGen emblem into the multi-resolution Windows icon and compiles the standard installer. Build-only dependencies are isolated in `.build-venv` and declared in `requirements-build.txt`; Inno Setup 6.7+ is the only external build prerequisite.
+`Build-GUI.ps1` reproduces the two internal unsigned Windows binaries, assembles `dist/rimworld-autopilot-0.0.4.zip`, converts the ImageGen emblem into the multi-resolution Windows icon and compiles the standard installer. Build-only dependencies are isolated in `.build-venv` and declared in `requirements-build.txt`; Inno Setup 6.7+ is the only external build prerequisite.

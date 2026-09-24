@@ -220,7 +220,7 @@ namespace RIMAPI.Services
                         job = JobMaker.MakeJob(JobDefOf.Equip, foundThing);
                     }
 
-                    if (ApparelUtility.HasPartsToWear(pawn, foundThing.def) == true)
+                    if (foundThing.def.IsApparel && ApparelUtility.HasPartsToWear(pawn, foundThing.def))
                     {
                         job = JobMaker.MakeJob(JobDefOf.Wear, foundThing);
                     }

@@ -19,6 +19,9 @@ __pycache__/
 # Build outputs
 build/
 dist/
+artifacts/promo/work/
+artifacts/promo/backups/
+artifacts/promo/final/*.mp4
 *.spec
 Laya-Control-Center.exe
 Laya-Setup.exe

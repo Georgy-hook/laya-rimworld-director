@@ -12,6 +12,8 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
+from laya_decisions import ask_laya_choice
+
 
 EXPANSION_PACKAGES = {
     "royalty": "ludeon.rimworld.royalty",
@@ -426,16 +428,7 @@ def _filter_axis(rows: dict[str, tuple[str, str | None]], flags: dict[str, bool]
 def _ask(agent: Any, state: dict[str, Any], question_id: str, instructions: str, criteria: dict[str, str]) -> tuple[str, dict[str, Any]]:
     if not criteria:
         return "", {"answers": {}}
-    if len(criteria) == 1:
-        choice = next(iter(criteria))
-        return choice, {"answers": {question_id: {"choice": choice, "confidence": 1.0, "probabilities": {choice: 1.0}}}}
-    raw = agent.predict(state, {question_id: {"type": "choice", "instructions": instructions, "criteria": criteria}})
-    answer = raw.get("answers", {}).get(question_id, {})
-    choice = str(answer.get("choice") or "")
-    if choice not in criteria:
-        choice = next(iter(criteria))
-        answer["choice"] = choice
-    return choice, raw
+    return ask_laya_choice(agent, state, question_id, instructions, criteria)
 
 
 def choose_cascaded_doctrine(agent: Any, state: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -472,15 +465,10 @@ def choose_cascaded_doctrine(agent: Any, state: dict[str, Any], context: dict[st
         independent["doctrine_specialization"] = {
             "type": "choice", "instructions": "Choose the workforce specialization supported by actual skills, passions and disabled work.", "criteria": profession_choices,
         }
-    raw_axes = agent.predict(state, independent)
-    raw_steps.append(raw_axes)
     for question_id, question in independent.items():
-        answer = raw_axes.get("answers", {}).get(question_id, {})
-        selected = str(answer.get("choice") or "")
-        if selected not in question["criteria"]:
-            selected = next(iter(question["criteria"]))
-            answer["choice"] = selected
-        answers[question_id] = answer
+        _, raw_axis = _ask(agent, state, question_id, str(question["instructions"]), dict(question["criteria"]))
+        raw_steps.append(raw_axis)
+        answers.update(raw_axis.get("answers", {}))
 
     family = str(answers["doctrine_economy_family"]["choice"])
     products = {

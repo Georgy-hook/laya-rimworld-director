@@ -129,6 +129,7 @@ namespace RIMAPI.Services
                 IsHostile = hostile,
                 IsDrafted = pawn.drafter?.Drafted ?? false,
                 IsDowned = pawn.Downed,
+                IsInMentalState = pawn.InMentalState,
                 IsDead = pawn.Dead,
                 Health = pawn.health?.summaryHealth?.SummaryHealthPercent ?? 0f,
                 Position = new PositionDto
@@ -150,6 +151,8 @@ namespace RIMAPI.Services
                 Gender = pawn.gender.ToString(),
                 BiologicalAge = pawn.ageTracker?.AgeBiologicalYears ?? 0,
                 BleedingRate = pawn.health?.hediffSet?.BleedRateTotal ?? 0f,
+                TendableNow = pawn.health?.hediffSet?.hediffs?.Any(h => h.TendableNow()) ?? false,
+                SelfTendAllowed = pawn.playerSettings?.selfTend ?? false,
                 Consciousness = pawn.health?.capacities?.GetLevel(PawnCapacityDefOf.Consciousness) ?? 0f,
                 Moving = pawn.health?.capacities?.GetLevel(PawnCapacityDefOf.Moving) ?? 0f,
                 Manipulation = pawn.health?.capacities?.GetLevel(PawnCapacityDefOf.Manipulation) ?? 0f,

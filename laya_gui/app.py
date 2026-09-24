@@ -18,9 +18,9 @@ from typing import Any
 import colony_strategy as strategy
 import laya_preferences
 
-from .i18n import PRIORITY_TEXT, QUESTION_TEXT, doctrine_view, humanize, tr
+from .i18n import PRIORITY_TEXT, QUESTION_TEXT, doctrine_view, humanize, risk_text, tr
 from .services import (
-    APP_NAME, BASE_DIR, DATA_DIR, PREFERENCES_PATH, RESOURCE_DIR, export_bundle, export_history,
+    APP_NAME, BASE_DIR, DATA_DIR, FEEDBACK_PATH, PREFERENCES_PATH, RESOURCE_DIR, append_feedback, export_bundle, export_history,
     load_config, read_director_health, read_pid, request_json, start_director, stop_director, tail_jsonl,
     timestamped_export_name,
 )
@@ -295,6 +295,8 @@ class ControlCenter(tk.Tk):
         page = self._new_page("history")
         toolbar = tk.Frame(page, bg=COLORS["window"])
         toolbar.pack(fill="x", pady=(0, 10))
+        ttk.Button(toolbar, text=tr(self.language, "correct_decision"), style="Soft.TButton",
+                   command=self.rate_selected_decision).pack(side="left")
         ttk.Checkbutton(toolbar, text=tr(self.language, "technical_mode"), variable=self.tech_var, command=self.toggle_technical).pack(side="right")
         history = ShadowCard(page, padx=10, pady=10)
         history.pack(fill="both", expand=True)
@@ -646,6 +648,14 @@ class ControlCenter(tk.Tk):
             confidence = decision.get("confidence")
             if confidence is not None:
                 lines.append(f"{tr(self.language, 'confidence')}: {float(confidence) * 100:.0f}%")
+            visible_state = raw.get("visible_state") or {}
+            if visible_state:
+                needs = visible_state.get("needs") or {}
+                lines.extend(["", tr(self.language, "seen_context") + ":",
+                              f"• {tr(self.language, 'seen_food')}: {needs.get('food', '—')}",
+                              f"• {tr(self.language, 'seen_hunger')}: {needs.get('least_hunger', '—')}"])
+                for risk in (visible_state.get("risks") or [])[:3]:
+                    lines.append(f"• {tr(self.language, 'seen_risks')}: {risk_text(str(risk), self.language)}")
             action_answer = answers.get("colony_goal_action") or {}
             probabilities = action_answer.get("probabilities") or {}
             ranked = sorted(probabilities.items(), key=lambda item: float(item[1]), reverse=True)
@@ -674,6 +684,48 @@ class ControlCenter(tk.Tk):
             lines.extend(["", f"{tr(self.language, 'result')}: {result_text}"])
             self.details.insert("1.0", "\n".join(lines))
         self.details.configure(state="disabled")
+
+    def rate_selected_decision(self) -> None:
+        selection = self.tree.selection() if hasattr(self, "tree") else ()
+        if not selection or not 0 <= int(selection[0]) < len(self.records):
+            return
+        record = self.records[int(selection[0])]
+        candidates = list(record.get("candidates") or [])
+        if not candidates or not ((record.get("decision") or {}).get("raw") or {}).get("visible_state"):
+            messagebox.showinfo(tr(self.language, "correction_title"), tr(self.language, "correction_unavailable"), parent=self)
+            return
+        window = tk.Toplevel(self)
+        window.title(tr(self.language, "correction_title"))
+        window.configure(bg=COLORS["window"])
+        window.geometry("620x345")
+        window.minsize(500, 300)
+        window.transient(self)
+        window.grab_set()
+        tk.Label(window, text=tr(self.language, "correction_help"), bg=COLORS["window"],
+                 fg=COLORS["text"], wraplength=560, justify="left", font=FONTS["body"]).pack(fill="x", padx=22, pady=(22, 14))
+        tk.Label(window, text=tr(self.language, "correct_choice"), bg=COLORS["window"],
+                 fg=COLORS["cyan"], font=FONTS["heading"]).pack(anchor="w", padx=22)
+        labels = {f"{humanize(name, self.language)}  [{name}]": name for name in candidates}
+        selected_name = str((record.get("decision") or {}).get("choice") or "")
+        default_label = next((label for label, name in labels.items() if name == selected_name), next(iter(labels)))
+        selected = tk.StringVar(value=default_label)
+        ttk.Combobox(window, textvariable=selected, values=list(labels), state="readonly").pack(fill="x", padx=22, pady=(5, 16))
+        tk.Label(window, text=tr(self.language, "correction_note"), bg=COLORS["window"],
+                 fg=COLORS["muted"], font=FONTS["body"]).pack(anchor="w", padx=22)
+        note = tk.Text(window, height=4, bg=COLORS["panel_alt"], fg=COLORS["text"],
+                       insertbackground=COLORS["cyan"], relief="flat", wrap="word", font=FONTS["body"])
+        note.pack(fill="both", expand=True, padx=22, pady=(5, 12))
+
+        def save() -> None:
+            try:
+                append_feedback(FEEDBACK_PATH, record, labels[selected.get()], note.get("1.0", "end").strip())
+            except (OSError, ValueError, KeyError) as exc:
+                messagebox.showerror(tr(self.language, "correction_title"), str(exc), parent=window)
+                return
+            window.destroy()
+            messagebox.showinfo(tr(self.language, "correction_title"), tr(self.language, "correction_saved"), parent=self)
+
+        ttk.Button(window, text=tr(self.language, "save"), style="Accent.TButton", command=save).pack(anchor="e", padx=22, pady=(0, 18))
 
     def _animate_mascot(self) -> None:
         elapsed = time.perf_counter() - self.animation_started

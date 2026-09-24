@@ -38,6 +38,41 @@ TACTICS: dict[str, dict[str, Any]] = {
         "description": "A fast ranged pawn draws pursuit while the firing group shoots; retreat paths must contain no friendly traps.",
         "tags": {"melee_enemy", "animal", "insect", "open_field"},
     },
+    "backstep_fire": {
+        "label": "Backstep and fire",
+        "description": "Mobile shooters take short trap-free steps away from adjacent melee enemies, then fire again without leaving pursuit distance.",
+        "tags": {"melee_enemy", "insect", "animal", "ranged"},
+    },
+    "screen_melee": {
+        "label": "Melee screen for shooters",
+        "description": "A capable but potentially exposed melee fighter intercepts the closest enemy while supporting shooters concentrate fire.",
+        "tags": {"melee_enemy", "insect", "animal", "close_quarters"},
+    },
+    "melee_assault": {
+        "label": "Coordinated melee assault",
+        "description": "All mobile armed melee fighters attack together instead of retreating one by one. Closing across open ground can be deadly against guns or stronger enemies; any allied shooters provide covering fire.",
+        "tags": {"melee_enemy", "ranged_enemy", "close_quarters", "assault"},
+    },
+    "melee_hold_line": {
+        "label": "Hold a melee group",
+        "description": "Gather sword fighters into one nearby group and intercept enemies when they close. This avoids a risky long charge but gives ranged enemies time to shoot and drafted fighters cannot rest or eat.",
+        "tags": {"melee_enemy", "defense", "close_quarters"},
+    },
+    "coordinate_melee_roles": {
+        "label": "Assign individual melee roles",
+        "description": "Choose each armed melee fighter's role separately: attack, guard, lure, or withdraw. They receive orders in one cycle, so one can draw pursuit while others attack or cover the shooters.",
+        "tags": {"melee_enemy", "close_quarters", "general"},
+    },
+    "advance_to_range": {
+        "label": "Bring guns into range",
+        "description": "Out-of-range shooters move in short trap-free steps while those already in range keep shooting. Advancing may expose the group.",
+        "tags": {"ranged", "assault", "mechanoid", "insect"},
+    },
+    "withdraw_and_regroup": {
+        "label": "Withdraw and regroup",
+        "description": "Move the selected mobile fighters beyond immediate enemy reach along trap-free routes; this stops their fire temporarily and enemies may pursue. Once at safe distance, choose a new tactic rather than repeating withdrawal.",
+        "tags": {"fallback", "ranged", "melee_enemy", "mechanoid"},
+    },
     "staggered_retreat": {
         "label": "Staggered retreat",
         "description": "One element moves to the fallback line while the other covers, preventing a simultaneous rout.",
@@ -182,7 +217,8 @@ def hostile_is_preparing(row: dict[str, Any]) -> bool:
 def available_tactics(snapshot: dict[str, Any]) -> dict[str, str]:
     combat = snapshot.get("combat", {})
     hostiles = [row for row in combat.get("hostiles", []) if not row.get("is_dead") and not row.get("is_downed")]
-    fighters = [row for row in combat.get("colonists", []) if not row.get("is_dead") and not row.get("is_downed") and float(row.get("health") or 0) >= 0.72 and float(row.get("moving", 1)) >= 0.65]
+    fighters = [row for row in combat.get("colonists", []) if not row.get("is_dead")
+                and not row.get("is_downed") and not row.get("is_in_mental_state")]
     if not hostiles:
         return {"stand_down": TACTICS["stand_down"]["description"]} if any(row.get("is_drafted") for row in fighters) else {}
     if not fighters:
@@ -192,7 +228,10 @@ def available_tactics(snapshot: dict[str, Any]) -> dict[str, str]:
     hostile_jobs = " ".join(hostile_text)
     defenses = _defense_types(snapshot)
     ranged = [row for row in fighters if row.get("has_ranged_weapon") and float(row.get("manipulation", 1)) >= 0.65 and float(row.get("sight", 1)) >= 0.65]
-    melee = [row for row in fighters if row.get("weapon_def") and not row.get("has_ranged_weapon") and int(row.get("melee_skill") or 0) >= 5 and float(row.get("moving", 1)) >= 0.8]
+    armed_melee = [row for row in fighters if row.get("weapon_def") and not row.get("has_ranged_weapon")
+                   and float(row.get("moving", 1)) >= 0.65]
+    melee = [row for row in armed_melee if int(row.get("melee_skill") or 0) >= 5
+             and float(row.get("moving", 1)) >= 0.8]
     armored_melee = [row for row in melee if float(row.get("armor_sharp") or 0) >= 0.4]
     psycasts = [ability for pawn in fighters for ability in (pawn.get("psycasts") or []) if ability.get("can_cast")]
     has_explosives = any(any(token in text for token in EXPLOSIVE_TOKENS) for text in hostile_text)
@@ -205,8 +244,25 @@ def available_tactics(snapshot: dict[str, Any]) -> dict[str, str]:
     in_range = [row for row in ranged if float(row.get("distance_to_nearest_opponent") or 9999)
                 <= float(row.get("weapon_range") or 0) + 1]
     names: list[str] = ["hold_cover"] if ranged else []
+    if armed_melee:
+        names += ["melee_assault", "melee_hold_line"]
+        if len(armed_melee) >= 2:
+            names.append("coordinate_melee_roles")
     if in_range:
         names.append("focus_fire")
+    if ranged and any(float(row.get("distance_to_nearest_opponent") or 9999)
+                      > float(row.get("weapon_range") or 0) + 1 for row in ranged):
+        names.append("advance_to_range")
+    retreat_distance = max(18.0, min(45.0, max(
+        (float(row.get("weapon_range") or 0) + 4.0 for row in hostiles if row.get("has_ranged_weapon")),
+        default=0.0,
+    )))
+    if any(float(row.get("moving", 1)) >= 0.65
+           and float(row.get("distance_to_nearest_opponent") or 9999) < retreat_distance
+           for row in fighters):
+        names.append("withdraw_and_regroup")
+    if not ranged and not armed_melee and any(float(row.get("moving", 1)) >= 0.65 for row in fighters):
+        names.append("civilian_retreat")
     if len(ranged) >= 2:
         names.append("firing_line")
     if len(ranged) >= 2 and (has_explosives or len(hostiles) >= 8):
@@ -225,8 +281,32 @@ def available_tactics(snapshot: dict[str, Any]) -> dict[str, str]:
         names.append("drop_pod_encircle")
     if has_insects and armored_melee and "door" in defenses:
         names.append("infestation_choke")
+    if len(ranged) >= 2 and all(not row.get("has_ranged_weapon") for row in hostiles) and (has_insects or any("animal" in text or "manhunter" in text for text in hostile_text)):
+        # Kiting is a coordinated lure-and-fire plan. A lone mobile pawn (or a
+        # lure already outside pursuit distance) merely abandons the shooters.
+        if any(
+            float(lure.get("moving", 1)) >= 0.85
+            and float(lure.get("distance_to_nearest_opponent") or 9999) <= 16
+            and any(
+                support.get("id") != lure.get("id")
+                and float(support.get("distance_to_nearest_opponent") or 9999)
+                <= float(support.get("weapon_range") or 0) + 12
+                for support in ranged
+            )
+            for lure in ranged
+        ):
+            names.append("kite")
     if ranged and all(not row.get("has_ranged_weapon") for row in hostiles) and (has_insects or any("animal" in text or "manhunter" in text for text in hostile_text)):
-        names.append("kite")
+        if any(float(row.get("distance_to_nearest_opponent") or 9999) <= 12
+               and float(row.get("moving", 1)) >= 0.7 for row in ranged):
+            names.append("backstep_fire")
+        if any(float(row.get("moving", 1)) >= 0.65
+               and int(row.get("melee_skill") or 0) >= 3
+               and float(row.get("distance_to_nearest_opponent") or 9999) <= 20
+               for row in melee) and any(
+                   float(row.get("distance_to_nearest_opponent") or 9999)
+                   <= float(row.get("weapon_range") or 0) + 1 for row in ranged):
+            names.append("screen_melee")
     if any("gun" in text or "sniper" in text or "lancer" in text for text in hostile_text) and armored_melee:
         names.append("rush_ranged")
     if has_kidnapper and ranged:
@@ -244,14 +324,38 @@ def available_tactics(snapshot: dict[str, Any]) -> dict[str, str]:
     result: dict[str, str] = {}
     for name in names:
         if name not in result:
-            result[name] = TACTICS[name]["description"]
+            description = TACTICS[name]["description"]
+            if name == "melee_assault" and ranged:
+                ready_support = sum(
+                    float(row.get("distance_to_nearest_opponent") or 9999)
+                    <= float(row.get("weapon_range") or 0) + 1
+                    and float(row.get("distance_to_nearest_opponent") or 9999) > 2
+                    for row in ranged
+                )
+                weakest_skill = min(int(row.get("melee_skill") or 0) for row in armed_melee)
+                least_armor = min(float(row.get("armor_sharp") or 0) for row in armed_melee)
+                strongest_enemy = max(int(row.get("melee_skill") or 0) for row in hostiles)
+                description = (f"Charge now: {len(armed_melee)} melee, lowest skill {weakest_skill}, "
+                               f"armor {least_armor:.1f}; enemy melee up to {strongest_enemy}. "
+                               f"Only {ready_support}/{len(ranged)} guns can cover. "
+                               "An unsupported low-skill fighter may lose a limb or die.")
+            if name == "focus_fire" and len(in_range) < len(ranged):
+                description += (f" Only {len(in_range)}/{len(ranged)} armed shooters can fire now; "
+                                "other selected shooters will advance in short trap-free steps, which exposes them.")
+            if name == "focus_fire" and len(in_range) < len(hostiles):
+                description += " Risk: fewer shooters are in range than active enemies; other fighters may be left exposed."
+            if name in {"focus_fire", "hold_cover", "firing_line"} and has_insects and any(
+                float(row.get("distance_to_nearest_opponent") or 9999) <= 6 for row in ranged
+            ):
+                description += " Risk: an adjacent insect may prevent a shooter from firing; a short retreat or melee screen may be better."
+            result[name] = description
     return result
 
 
 def psycast_options(snapshot: dict[str, Any], hostile: bool | None = None) -> dict[str, dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {}
     for pawn in snapshot.get("combat", {}).get("colonists", []):
-        if pawn.get("is_dead") or pawn.get("is_downed"):
+        if pawn.get("is_dead") or pawn.get("is_downed") or pawn.get("is_in_mental_state"):
             continue
         for ability in pawn.get("psycasts") or []:
             if not ability.get("can_cast"):

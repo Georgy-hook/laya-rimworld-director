@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import colony_strategy as strategy
+import colony_architect as architect
 
 
 TEXT = {
@@ -14,7 +15,7 @@ TEXT = {
         "hero_subtitle": "Laya наблюдает, выбирает курс и действует локально.",
         "strategy_sub": "Курс развития, выбранный Laya, и доступные альтернативы.",
         "priorities_sub": "Ваши пожелания влияют на выбор модели, но не отменяют безопасность и реальные ограничения игры.",
-        "history_sub": "Почему Laya сделала выбор — без технического шума.",
+        "history_sub": "Что Laya видела, какие варианты сравнивала и что произошло.",
         "settings_sub": "Язык, диагностика, обслуживание и экспорт.",
         "laya_online": "Laya работает", "laya_offline": "Laya остановлена", "laya_starting": "Laya запускается", "laya_waiting": "Laya ждёт игру", "laya_error": "Ошибка цикла Laya", "laya_unresponsive": "Laya не отвечает", "game_online": "Игра подключена", "game_offline": "Игра не найдена",
         "start": "Запустить Laya", "stop": "Остановить", "pause": "Пауза", "resume": "Продолжить",
@@ -25,14 +26,20 @@ TEXT = {
         "personal_note": "Личная корректировка для Laya", "personal_note_hint": "Например: сначала укрепи производство еды, не продавай последнюю медицину и избегай войны до зимы.",
         "safety": "Границы решений", "avoid_attacks": "Не начинать неспровоцированные нападения", "peaceful_trade": "Предпочитать мирную торговлю", "protect_food": "Не тратить аварийный запас еды",
         "technical_logging": "Технический режим журнала", "technical_help": "Добавляет полный снимок состояния для диагностики. Файлы становятся значительно больше.",
-        "overlay_title": "HUD Laya в RimWorld", "overlay_help": "Компактный HUD показывает решение и до пяти вариантов жёлтыми полосами вероятности. Его можно полностью скрыть без остановки Laya.", "overlay_enabled": "Показывать HUD Laya в игре", "overlay_compact": "Компактный HUD", "overlay_saved": "Настройки HUD сохранены.",
-        "friendly_mode": "Понятный режим", "technical_mode": "Технический режим", "details": "Объяснение решения",
+        "overlay_title": "HUD Laya в RimWorld", "overlay_help": "Компактный HUD показывает относительные оценки вариантов Laya, а не шанс успеха. Его можно скрыть без остановки Laya.", "overlay_enabled": "Показывать HUD Laya в игре", "overlay_compact": "Компактный HUD", "overlay_saved": "Настройки HUD сохранены.",
+        "friendly_mode": "Понятный режим", "technical_mode": "Технический режим", "details": "Контекст и варианты",
         "language": "Язык интерфейса", "installer": "Установка", "run_installer": "Открыть помощник установки", "open_folder": "Открыть папку", "export_history": "Экспортировать историю", "export_bundle": "Экспортировать Autopilot",
         "install_help": "Помощник создаст отдельное окружение Python, установит пакеты и подключит мод к RimWorld.",
         "maintenance": "Управление приложением", "maintenance_help": "Удаление выполняет штатный деинсталлятор Windows. Ваши журналы и настройки в LocalAppData сохраняются для безопасного обновления.", "uninstall": "Удалить Autopilot",
         "ready": "Готово", "running": "работает", "stopped": "остановлена", "check": "проверка…",
-        "decision_intro": "Laya рассмотрела {count} вариантов и выбрала: {choice}.", "confidence": "Уверенность", "result": "Результат", "why": "Последовательность выбора",
+        "decision_intro": "Laya рассмотрела {count} вариантов и выбрала: {choice}.", "confidence": "Чёткость выбора", "result": "Результат", "why": "Последовательность выбора",
         "alternatives": "Что рассматривала Laya", "more_options": "и ещё {count} вариантов",
+        "correct_decision": "Оценить решение", "correction_title": "Помочь обучить Laya",
+        "correction_help": "Выберите лучший вариант из доступных тогда. Это сохранит пример для будущего дообучения, но не изменит модель сразу.",
+        "correct_choice": "Лучшее действие", "correction_note": "Почему? (необязательно)",
+        "correction_saved": "Оценка сохранена для будущего обучения Laya.",
+        "correction_unavailable": "Для этого старого решения не сохранён контекст модели.",
+        "seen_context": "Что видела Laya", "seen_food": "Еда", "seen_hunger": "Минимальная сытость", "seen_risks": "Риски",
         "done": "Выполнено", "not_applied": "Пока не выполнено: игровые условия ещё не готовы.", "error": "Произошла ошибка. Подробности доступны в техническом режиме.", "none": "Нет данных",
     },
     "en": {
@@ -43,7 +50,7 @@ TEXT = {
         "hero_subtitle": "Laya watches, chooses a course and acts locally.",
         "strategy_sub": "Laya's chosen development course and the alternatives currently available.",
         "priorities_sub": "Your preferences guide the model without bypassing safety or real game constraints.",
-        "history_sub": "Why Laya made each choice, without technical noise.",
+        "history_sub": "What Laya saw, which options it compared, and what happened.",
         "settings_sub": "Language, diagnostics, maintenance and export.",
         "laya_online": "Laya is running", "laya_offline": "Laya is stopped", "laya_starting": "Laya is starting", "laya_waiting": "Laya is waiting for the game", "laya_error": "Laya cycle error", "laya_unresponsive": "Laya is not responding", "game_online": "Game connected", "game_offline": "Game not found",
         "start": "Start Laya", "stop": "Stop", "pause": "Pause", "resume": "Resume",
@@ -54,17 +61,40 @@ TEXT = {
         "personal_note": "Personal guidance for Laya", "personal_note_hint": "For example: secure food production first, keep the last medicine, and avoid war until winter.",
         "safety": "Decision boundaries", "avoid_attacks": "Do not begin unprovoked attacks", "peaceful_trade": "Prefer peaceful trade", "protect_food": "Protect the emergency food reserve",
         "technical_logging": "Technical logging", "technical_help": "Adds a full state snapshot for diagnostics. Log files become much larger.",
-        "overlay_title": "Laya HUD in RimWorld", "overlay_help": "The compact HUD shows the decision and up to five alternatives as yellow probability bars. You can hide it completely without stopping Laya.", "overlay_enabled": "Show the Laya HUD in game", "overlay_compact": "Compact HUD", "overlay_saved": "HUD settings saved.",
-        "friendly_mode": "Friendly view", "technical_mode": "Technical view", "details": "Decision explanation",
+        "overlay_title": "Laya HUD in RimWorld", "overlay_help": "The compact HUD shows Laya's relative option weights, not the chance of success. Hide it without stopping Laya.", "overlay_enabled": "Show the Laya HUD in game", "overlay_compact": "Compact HUD", "overlay_saved": "HUD settings saved.",
+        "friendly_mode": "Friendly view", "technical_mode": "Technical view", "details": "Context and options",
         "language": "Interface language", "installer": "Installation", "run_installer": "Open setup assistant", "open_folder": "Open folder", "export_history": "Export history", "export_bundle": "Export Autopilot",
         "install_help": "The assistant creates an isolated Python environment, installs packages and connects the mod to RimWorld.",
         "maintenance": "App management", "maintenance_help": "Removal uses the standard Windows uninstaller. Logs and preferences in LocalAppData are kept for safe upgrades.", "uninstall": "Uninstall Autopilot",
         "ready": "Ready", "running": "running", "stopped": "stopped", "check": "checking…",
-        "decision_intro": "Laya considered {count} options and chose: {choice}.", "confidence": "Confidence", "result": "Result", "why": "Decision path",
+        "decision_intro": "Laya considered {count} options and chose: {choice}.", "confidence": "Choice clarity", "result": "Result", "why": "Decision path",
         "alternatives": "Options Laya considered", "more_options": "and {count} more options",
+        "correct_decision": "Rate decision", "correction_title": "Help train Laya",
+        "correction_help": "Choose the best option available at that moment. This saves a future training example; it does not update the model immediately.",
+        "correct_choice": "Best action", "correction_note": "Why? (optional)",
+        "correction_saved": "Feedback saved for future Laya training.",
+        "correction_unavailable": "This older decision has no saved model context.",
+        "seen_context": "What Laya saw", "seen_food": "Food", "seen_hunger": "Lowest food need", "seen_risks": "Risks",
         "done": "Completed", "not_applied": "Not completed yet: game conditions are not ready.", "error": "An error occurred. Details are available in technical view.", "none": "No data",
     },
 }
+
+RISK_TEXT_RU = {
+    "No food and a colonist is close to starvation; delay can kill.": "Еды нет, колонист близок к голодной смерти; задержка опасна.",
+    "Untreated bleeding may kill; treatment also takes a worker away from other tasks.": "Кровотечение может убить; лечение временно отвлечёт работника от других дел.",
+    "Downed people cannot work or feed themselves.": "Лежачие колонисты не могут работать и есть самостоятельно.",
+    "Hostiles can injure or kidnap colonists; combat consumes food and rest.": "Враги могут ранить или похитить людей; бой расходует силы и время.",
+    "An injured colony animal may worsen or die without care.": "Раненое домашнее животное может погибнуть без ухода.",
+}
+
+
+def risk_text(value: str, language: str) -> str:
+    if language != "ru":
+        return value
+    if value in RISK_TEXT_RU:
+        return RISK_TEXT_RU[value]
+    return next((translated for english, translated in RISK_TEXT_RU.items()
+                 if len(value) > 20 and english.startswith(value)), value)
 
 PRIORITY_TEXT = {
     "ru": {
@@ -264,8 +294,38 @@ OPTION_RU = {
 }
 
 QUESTION_TEXT = {
-    "ru": {"colony_goal_action": "Следующее действие", "colony_goal_domain": "Область следующей задачи", "colony_goal_family": "Группа задач", "doctrine_domain": "Область развития", "doctrine_primary_direction": "Основной курс", "doctrine_economy_family": "Тип экономики", "doctrine_economy_product": "Продукт или доход", "doctrine_technology": "Технологический приоритет", "doctrine_military": "Оборонная доктрина", "doctrine_society": "Устройство общества", "doctrine_endgame": "Долгосрочная цель", "doctrine_diplomacy": "Внешняя политика", "doctrine_settlement_form": "Форма поселения", "doctrine_material": "Материал", "doctrine_beauty": "Красота помещений", "doctrine_specialization": "Специализация колонистов", "hunt_target": "Цель охоты", "tame_target": "Животное для приручения", "wild_plant_type": "Растение для сбора", "worker_pawn": "Исполнитель", "construction_project": "Строительный проект", "architecture_program": "Назначение здания", "architecture_house_style": "Стиль дома", "architecture_variant": "Вариант планировки", "doctrine_research_target": "Следующее исследование", "lighting_room": "Помещение для освещения", "skill_training_plan": "План обучения", "night_owl_pawn": "Колонист с ночным режимом", "workbench_upgrade": "Улучшение верстака", "trade_purchase_plan": "Что купить в поездке", "stone_type": "Тип камня", "critical_floor_plan": "Помещение и покрытие пола", "path_material": "Материал дорожки", "sculpture_install_plan": "Скульптура и помещение", "animal_barn_material": "Материал дома животных", "animal_barn_floor": "Пол дома животных", "temple_altar": "Ритуальный объект", "temple_material": "Материал храма"},
-    "en": {"colony_goal_action": "Next action", "colony_goal_domain": "Next task domain", "colony_goal_family": "Task family", "doctrine_domain": "Development domain", "doctrine_primary_direction": "Primary course", "doctrine_economy_family": "Economy family", "doctrine_economy_product": "Product or income", "doctrine_technology": "Technology focus", "doctrine_military": "Defense doctrine", "doctrine_society": "Social organization", "doctrine_endgame": "Long-term objective", "doctrine_diplomacy": "Foreign policy", "doctrine_settlement_form": "Settlement form", "doctrine_material": "Material", "doctrine_beauty": "Room beauty", "doctrine_specialization": "Colonist specialization", "hunt_target": "Hunting target", "tame_target": "Animal to tame", "wild_plant_type": "Plant to gather", "worker_pawn": "Assigned colonist", "construction_project": "Construction project", "architecture_program": "Building purpose", "architecture_house_style": "House style", "architecture_variant": "Layout variant", "doctrine_research_target": "Next research", "lighting_room": "Room to light", "skill_training_plan": "Training plan", "night_owl_pawn": "Night Owl colonist", "workbench_upgrade": "Workbench upgrade", "trade_purchase_plan": "Purchase priority", "stone_type": "Stone type", "critical_floor_plan": "Room and flooring", "path_material": "Path material", "sculpture_install_plan": "Sculpture and room", "animal_barn_material": "Animal shelter material", "animal_barn_floor": "Animal shelter floor", "temple_altar": "Ritual focus", "temple_material": "Temple material"},
+    "ru": {"colony_goal_action": "Следующее действие", "colony_goal_domain": "Область следующей задачи", "colony_goal_family": "Группа задач", "doctrine_domain": "Область развития", "doctrine_primary_direction": "Основной курс", "doctrine_economy_family": "Тип экономики", "doctrine_economy_product": "Продукт или доход", "doctrine_technology": "Технологический приоритет", "doctrine_military": "Оборонная доктрина", "doctrine_society": "Устройство общества", "doctrine_endgame": "Долгосрочная цель", "doctrine_diplomacy": "Внешняя политика", "doctrine_settlement_form": "Форма поселения", "doctrine_material": "Материал", "doctrine_beauty": "Красота помещений", "doctrine_specialization": "Специализация колонистов", "hunt_target": "Цель охоты", "tame_target": "Животное для приручения", "wild_plant_type": "Растение для сбора", "worker_pawn": "Исполнитель", "construction_project": "Строительный проект", "architecture_program": "Назначение здания", "architecture_material": "Материал здания", "architecture_entry": "Сторона входа", "architecture_house_style": "Стиль дома", "architecture_variant": "Вариант планировки", "doctrine_research_target": "Следующее исследование", "lighting_room": "Помещение для освещения", "skill_training_plan": "План обучения", "night_owl_pawn": "Колонист с ночным режимом", "workbench_upgrade": "Улучшение верстака", "trade_purchase_plan": "Что купить в поездке", "stone_type": "Тип камня", "critical_floor_plan": "Помещение и покрытие пола", "path_material": "Материал дорожки", "sculpture_install_plan": "Скульптура и помещение", "animal_barn_material": "Материал дома животных", "animal_barn_floor": "Пол дома животных", "temple_altar": "Ритуальный объект", "temple_material": "Материал храма"},
+    "en": {"colony_goal_action": "Next action", "colony_goal_domain": "Next task domain", "colony_goal_family": "Task family", "doctrine_domain": "Development domain", "doctrine_primary_direction": "Primary course", "doctrine_economy_family": "Economy family", "doctrine_economy_product": "Product or income", "doctrine_technology": "Technology focus", "doctrine_military": "Defense doctrine", "doctrine_society": "Social organization", "doctrine_endgame": "Long-term objective", "doctrine_diplomacy": "Foreign policy", "doctrine_settlement_form": "Settlement form", "doctrine_material": "Material", "doctrine_beauty": "Room beauty", "doctrine_specialization": "Colonist specialization", "hunt_target": "Hunting target", "tame_target": "Animal to tame", "wild_plant_type": "Plant to gather", "worker_pawn": "Assigned colonist", "construction_project": "Construction project", "architecture_program": "Building purpose", "architecture_material": "Building material", "architecture_entry": "Entrance side", "architecture_house_style": "House style", "architecture_variant": "Layout variant", "doctrine_research_target": "Next research", "lighting_room": "Room to light", "skill_training_plan": "Training plan", "night_owl_pawn": "Night Owl colonist", "workbench_upgrade": "Workbench upgrade", "trade_purchase_plan": "Purchase priority", "stone_type": "Stone type", "critical_floor_plan": "Room and flooring", "path_material": "Path material", "sculpture_install_plan": "Sculpture and room", "animal_barn_material": "Animal shelter material", "animal_barn_floor": "Animal shelter floor", "temple_altar": "Ritual focus", "temple_material": "Temple material"},
+}
+
+ARCHITECTURE_RU = {
+    "residence": "Отдельный дом", "residential_compound": "Жилой комплекс",
+    "dining_recreation": "Столовая и отдых", "kitchen": "Кухня", "freezer": "Холодильник",
+    "hospital": "Больница", "throne_room": "Тронный зал", "temple": "Храм",
+    "workshop": "Мастерская", "factory": "Фабрика", "research_lab": "Лаборатория",
+    "storage": "Склад", "prison": "Тюрьма", "barn": "Дом для животных",
+    "nursery": "Детская и школа", "defense": "Оборонительные сооружения",
+    "power_utility": "Энергетический блок",
+}
+HOUSE_STYLE_RU = {
+    "compact": "небольшой", "comfort": "уютный", "garden": "с растениями",
+    "artisan": "украшенный", "couple": "для пары", "family": "семейный",
+}
+HOUSE_STYLE_EN = {
+    "compact": "compact", "comfort": "comfortable", "garden": "garden",
+    "artisan": "decorated", "couple": "couple's", "family": "family",
+}
+BUILDING_CHOICE_LABELS = {
+    "ru": {"north": "Северный вход", "east": "Восточный вход", "south": "Южный вход",
+           "west": "Западный вход", "WoodLog": "Дерево", "BlocksGranite": "Гранит",
+           "BlocksLimestone": "Известняк", "BlocksSandstone": "Песчаник",
+           "BlocksSlate": "Сланец", "BlocksMarble": "Мрамор", "Steel": "Сталь",
+           "Plasteel": "Пласталь", "Uranium": "Уран"},
+    "en": {"north": "North entrance", "east": "East entrance", "south": "South entrance",
+           "west": "West entrance", "WoodLog": "Wood", "BlocksGranite": "Granite",
+           "BlocksLimestone": "Limestone", "BlocksSandstone": "Sandstone",
+           "BlocksSlate": "Slate", "BlocksMarble": "Marble", "Steel": "Steel",
+           "Plasteel": "Plasteel", "Uranium": "Uranium"},
 }
 
 
@@ -276,6 +336,20 @@ def tr(language: str, key: str, **values: Any) -> str:
 
 def humanize(value: Any, language: str = "ru") -> str:
     key = str(value or "")
+    if key in BUILDING_CHOICE_LABELS[language]:
+        return BUILDING_CHOICE_LABELS[language][key]
+    if key.startswith("house_"):
+        style, _, number = key.removeprefix("house_").rpartition("_")
+        if style in HOUSE_STYLE_RU and number.isdigit():
+            return (f"{HOUSE_STYLE_RU[style].capitalize()} дом · вариант {number}" if language == "ru"
+                    else f"{HOUSE_STYLE_EN[style].capitalize()} house · option {number}")
+    if key in architect.PROGRAM_CATALOG:
+        return ARCHITECTURE_RU.get(key, key) if language == "ru" else str(architect.PROGRAM_CATALOG[key]["label"]).capitalize()
+    for program in architect.PROGRAM_CATALOG:
+        if key.startswith(f"{program}_") and key.removeprefix(f"{program}_").isdigit():
+            number = key.removeprefix(f"{program}_")
+            label = ARCHITECTURE_RU.get(program, program) if language == "ru" else str(architect.PROGRAM_CATALOG[program]["label"]).capitalize()
+            return f"{label} · {'вариант' if language == 'ru' else 'option'} {number}"
     if key.startswith("trade_to:"):
         parts = key.split(":", 2)
         destination = f"поселение №{parts[1]}" if language == "ru" else f"settlement #{parts[1]}"

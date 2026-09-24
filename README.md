@@ -1,8 +1,30 @@
 # RimWorld Autopilot
 
+### Give Laya a colony. Watch the choices become a story.
+
+RimWorld Autopilot lets a local open-weight model direct an experimental RimWorld colony. Laya sees the live situation, compares feasible actions and sends ordinary in-game orders. You can watch each decision and its relative option weights in the game or in the Windows control center.
+
+[![RimWorld Autopilot promo: a large colony and Laya's real decision bars](assets/promo/cover.jpg)](https://github.com/Georgy-hook/rimworld-autopilot/releases/download/v0.0.4/RimWorld-Autopilot-promo.mp4)
+
+**[Watch the 56-second promo](https://github.com/Georgy-hook/rimworld-autopilot/releases/download/v0.0.4/RimWorld-Autopilot-promo.mp4)** · **[Download the Windows installer](https://github.com/Georgy-hook/rimworld-autopilot/releases/download/v0.0.4/RimWorld-Autopilot-0.0.4-Setup.exe)** · [Quick install](#quick-install)
+
+### Laya in action
+
+| Combat | Building |
+|:--:|:--:|
+| ![Laya choosing combat actions with visible probability bars](assets/promo/combat.gif) | ![Laya directing construction with visible probability bars](assets/promo/building.gif) |
+| Harvest | Care |
+| ![Laya choosing wild plants to harvest with visible probability bars](assets/promo/harvest.gif) | ![Laya handling medical care with visible probability bars](assets/promo/care.gif) |
+
+These are clips from disposable test colonies, not a promise of survival. The yellow bars show the model's **relative weights among the options it was given**—not the probability that an action will succeed. The large-colony finale retains a genuine recorded Laya HUD and its unequal bars; only the background was blurred for the title.
+
+Your four edited source clips are kept unchanged and attached to the [0.0.4 release](https://github.com/Georgy-hook/rimworld-autopilot/releases/tag/v0.0.4) alongside the montage and the large-colony shot. The GIFs are lightweight previews of those clips.
+
+## Technical details
+
 > Experimental autonomous colony management for RimWorld 1.6, powered by the local open-weight Laya decision model.
 
-Version **0.0.3** · Windows · Python 3.10–3.12 · RimWorld 1.6 · GPL-3.0
+Version **0.0.4** · Windows · Python 3.10–3.12 · RimWorld 1.6 · GPL-3.0
 
 RimWorld Autopilot reads a colony through a modified local RIMAPI mod, gives the Laya model a bounded set of real and currently feasible choices, and converts the selected choice into ordinary RimWorld work priorities, designations, bills, blueprints, research, caravans and combat orders.
 
@@ -10,15 +32,15 @@ It is not a prerecorded build order. Laya sees compact context, chooses between 
 
 The project is unofficial and experimental. It can make bad decisions and lose a colony. **Use a copied save.**
 
-## What 0.0.3 can do
+## What 0.0.4 can do
 
 - Food: unforbid starting supplies, create food storage/freezer space, cook, butcher, hunt and harvest wild edible plants.
 - Farming: select crops, consider current season and forecast temperatures, pause late sowing without destroying existing crops, and resume viable seasonal sowing.
 - Storage: expand near-full stockpiles, configure dedicated weapon shelves, place stone chunks beside the stonecutter, animal carcasses beside butchering, and human corpses in a distant critical-priority dump.
 - Housing and rooms: choose compact, courtyard, separate-house or mountain development; choose real available construction materials; build private bedrooms without replacing existing rooms.
-- Procedural architecture: choose a building program before its layout; generate 24 residential designs plus context-aware compounds, dining/rec halls, kitchens, hospitals, throne rooms, temples, workshops, factories, labs, warehouses, prisons, barns, nurseries, defenses and utility blocks from the definitions loaded by the current game.
+- Procedural architecture: Laya chooses a building purpose, affordable wall material, entrance side, house style when relevant, and a generated layout. A stable seed varies the precise doorway position; 24 residential designs plus context-aware compounds, dining/rec halls, kitchens, hospitals, throne rooms, temples, workshops, factories, labs, warehouses, prisons, barns, nurseries, defenses and utility blocks are generated from the definitions loaded by the current game.
 - Psycasts: expose every live vanilla/DLC/mod psycast with caster, level, range, target mode, cooldown, charges, psyfocus cost and neural heat; Laya may choose an exact cast, while RIMAPI rejects invalid targets, insufficient focus and unsafe heat overflow.
-- Combat doctrine: compare 29 situational tactics including focus fire, firing lines, kiting, safe civilian withdrawal, staggered retreats, doorway/melee blocking, flanks, pincers, anti-explosive spacing, EMP/smoke operations, siege harassment, drop-pod encirclement, infestation containment, mech-cluster pokes and kidnapper interception.
+- Combat doctrine: compare 36 situational tactics including coordinated melee, mixed squads, short advances into firing range, bounded kiting, focus fire, safe civilian withdrawal, EMP/smoke operations, infestation containment, mech-cluster pokes and kidnapper interception.
 - Defensive integration: tactical positions are selected from defenses that actually exist on the map (doors, cover, traps, turrets, mortars, firefoam and fallback structures); every issued movement route is inspected and rejected if it crosses a friendly trap.
 - Event director: observe every loaded incident dynamically, classify known event families, surface unknown DLC/mod events conservatively, and deduplicate each occurrence while active conditions, letters and quest targets remain visible to Laya.
 - Kidnapping and rescue: track kidnapped world pawns, inspect rescue/ransom quest sites and estimated threat, accept a selected quest, then form a reserve-aware rescue caravan that enters the actual quest site.
@@ -43,7 +65,7 @@ The project is unofficial and experimental. It can make bad decisions and lose a
 - Decision integrity: a single feasible outcome is resolved deterministically by the bridge and is never sent to Laya as a fake choice; the model is invoked only when at least two real alternatives remain.
 - Friendly control center: dark fancy-cartoon dashboard with rounded cards, animated buttons and orbit effects, a panoramic colony scene, a coordinated original icon set, responsive scrollable pages, modern scrollbars, real flag artwork, Russian/English UI, friendly decision explanations and an optional technical view.
 - Player guidance: eight priority weights, a personal instruction and peaceful/safety boundaries are read by development, combat and event decisions without bypassing feasibility gates.
-- Standard Windows installer: `RimWorld-Autopilot-0.0.3-Setup.exe` installs to Program Files, offers a desktop shortcut, registers a Windows uninstaller, then opens the friendly one-time assistant for Python, local-model and RIMAPI configuration. The temporary assistant is removed when setup finishes.
+- Standard Windows installer: `RimWorld-Autopilot-0.0.4-Setup.exe` installs to Program Files, offers a desktop shortcut, registers a Windows uninstaller, then opens the friendly one-time assistant for Python, local-model and RIMAPI configuration. The temporary assistant is removed when setup finishes.
 
 ## Safety model
 
@@ -61,9 +83,9 @@ Prerequisites:
 4. An NVIDIA GPU is recommended; CPU mode is supported but slower.
 5. At least roughly 1 GB free for model weights and additional space for PyTorch.
 
-Download **[RimWorld-Autopilot-0.0.3-Setup.exe](https://github.com/Georgy-hook/rimworld-autopilot/releases/download/v0.0.3/RimWorld-Autopilot-0.0.3-Setup.exe)** from the 0.0.3 release and open it. Choose whether to add a desktop shortcut. On the final page, leave **Configure Python, the local model and the RimWorld mod now** selected; the friendly assistant then verifies Python and RimWorld, creates the local environment, downloads Laya's model weights and installs the bundled RIMAPI build without a command line.
+Download **[RimWorld-Autopilot-0.0.4-Setup.exe](https://github.com/Georgy-hook/rimworld-autopilot/releases/download/v0.0.4/RimWorld-Autopilot-0.0.4-Setup.exe)** from the 0.0.4 release and open it. Choose whether to add a desktop shortcut. On the final page, leave **Configure Python, the local model and the RimWorld mod now** selected; the friendly assistant then verifies Python and RimWorld, creates the local environment, downloads Laya's model weights and installs the bundled RIMAPI build without a command line.
 
-Windows may show an Unknown Publisher warning because 0.0.3 is an unsigned open-source preview. Verify that the file came from this repository's GitHub release before running it. The ZIP asset is retained for maintainers and portable inspection; normal players should use the Setup EXE.
+Windows may show an Unknown Publisher warning because 0.0.4 is an unsigned open-source preview. Verify that the file came from this repository's GitHub release before running it. The ZIP asset is retained for maintainers and portable inspection; normal players should use the Setup EXE.
 
 The PowerShell path remains available for maintainers:
 
@@ -84,7 +106,7 @@ For CPU inference:
 .\Install.ps1 -Device cpu
 ```
 
-The installer copies the application and local artwork, registers **RimWorld Autopilot 0.0.3** in Windows Installed apps, and creates only the selected shortcuts. Its temporary configuration assistant creates `.venv`, installs `laya==0.3.4`, downloads the root model weights, backs up an existing local `Mods\RIMAPI` folder, installs the modified build, and writes `rimworld-autopilot.json`. Writable preferences and logs live under `%LOCALAPPDATA%\RimWorld Autopilot`, not Program Files.
+The 0.0.4 installer copies the application and local artwork, registers it in Windows Installed apps, and creates only the selected shortcuts. Its temporary configuration assistant creates `.venv` in the chosen application folder, installs the dependencies bundled with this release (Laya 0.3.7), downloads the root model weights, backs up an existing local `Mods\RIMAPI` folder, installs the modified build, and writes `rimworld-autopilot.json` both beside the application and under `%LOCALAPPDATA%\RimWorld Autopilot`. Writable preferences and logs also live under LocalAppData. The installer does not bundle model weights; the first setup or launch requires Internet access to download them.
 
 Then:
 
@@ -100,7 +122,7 @@ Stop the console director with `Ctrl+C`, or click **Остановить** in th
 
 Use **Settings → Apps → Installed apps → RimWorld Autopilot → Uninstall**, the Start-menu uninstall shortcut, or **Settings → App management → Uninstall Autopilot** inside the control center. The original Setup file is not kept in Program Files; Windows keeps only its standard `unins000.exe` uninstaller.
 
-Uninstall removes the application and shortcuts. It intentionally preserves `%LOCALAPPDATA%\RimWorld Autopilot` and the installed `Mods\RIMAPI` folder so logs, preferences and a potentially shared mod are not destroyed unexpectedly. They can be removed manually after reviewing them.
+Uninstall removes files installed by Setup and its shortcuts. It intentionally preserves `%LOCALAPPDATA%\RimWorld Autopilot` and the installed `Mods\RIMAPI` folder so logs, preferences and a potentially shared mod are not destroyed unexpectedly. The post-install assistant's `.venv` and `rimworld-autopilot.json` in the chosen application folder are not tracked by Inno Setup and may also remain after uninstall; review and remove that folder manually if you no longer need those generated files. The model cache in the user's Hugging Face cache is separate and is not removed.
 
 ## Manual commands
 
@@ -127,14 +149,14 @@ Each cycle follows a hierarchical decision pipeline:
 3. If the list is large, choose a domain and action family first.
 4. Choose one concrete action.
 5. Ask only for parameters belonging to that selected action; rejecting hunting never asks for prey, and rejecting wild harvest never asks for a plant.
-6. For architecture, choose program → house style when relevant → one bounded generated variant; the other programs and layouts are never evaluated.
+6. For architecture, choose purpose → affordable wall material → entrance side (except defensive works) → house style when relevant → one bounded generated variant. Each later question is asked only if Laya picked construction. Known fixed costs (including cooler components), furniture stuff and floor materials are counted; incompatible, unaffordable or overlapping plans are not offered. The selected layout is regenerated from its saved seed before execution.
 7. For combat, choose tactic → exact roster → psycast/caster only when a psychic tactic was selected; RIMAPI then resolves trap-free positions against live defenses.
 8. For events, choose one verified occurrence → response → trader/quest/mission parameters only when that branch needs them.
 9. Validate the selected choice again and translate it into normal game commands.
 
-Emergency survival gates run before long-horizon planning. Combat is checked much more often than ordinary development. Repeated orders are suppressed using a persistent state file and signatures of active combatants/jobs.
+Urgent survival facts are described as risks, not hard-coded orders: food, care, construction and strategy can compete in the same decision. Combat is checked much more often than ordinary development. Repeated orders are suppressed using a persistent state file and signatures of active combatants/jobs. A live research tree and live Core/DLC/mod work types provide additional choices beyond the authored project catalogue.
 
-The model is a fast decision classifier, not a text-generating agent. The controller — not the model — defines the allowed actions and validates their parameters.
+The model is a fast decision classifier, not a text-generating agent. It cannot invent a new command string outside the supplied action space, and its base checkpoint has not been trained to play RimWorld. The bridge exposes real action affordances and validates their parameters; Laya selects and combines them. The displayed percentages are **relative option weights, not probabilities of success or calibrated gameplay confidence**. See [Laya architecture and evaluation](docs/LAYA_ARCHITECTURE.md) before enabling unattended play.
 
 ## Architecture
 
@@ -195,9 +217,11 @@ Reproducible Windows GUI binaries (creates a separate build environment):
 .\Build-GUI.ps1
 ```
 
-The same command assembles `dist/rimworld-autopilot-0.0.3.zip` and compiles `dist/RimWorld-Autopilot-0.0.3-Setup.exe` with Inno Setup 6.7+. The installer embeds the complete payload, a temporary post-install configuration assistant, the custom portrait artwork and standard Windows uninstall metadata.
+The same command assembles `dist/rimworld-autopilot-0.0.4.zip` and compiles `dist/RimWorld-Autopilot-0.0.4-Setup.exe` with Inno Setup 6.7+. The installer embeds the complete payload, a temporary post-install configuration assistant, the custom portrait artwork and standard Windows uninstall metadata.
 
-Version 0.0.3 passes 104 Python tests, smoke-tests both Tk applications and compiles the C# mod with zero warnings/errors. Disposable live raids also exercised staging, weapon pickup, tactical orders and post-raid stand-down; survival is not guaranteed in every scenario.
+To rebuild the promotional montage and four GIF previews on Windows, download the five source MP4s attached to the 0.0.4 release into `artifacts/promo/final`, install the optional `requirements-promo.txt` dependencies and run `python tools/build_promo.py`. The script writes temporary render frames under `artifacts/promo/work`, leaves the edited source clips untouched, and generates its own soundtrack; that work directory can be removed after checking the output.
+
+Version 0.0.4 passes 153 Python tests, the GUI asset validator, a C# build with zero warnings/errors, and fresh PyInstaller/Inno Setup packaging. The new tactical paths have deterministic tests, but this release has not completed an exhaustive live-game combat benchmark; survival is not guaranteed.
 
 ## Data and privacy
 

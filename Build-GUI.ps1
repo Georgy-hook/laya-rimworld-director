@@ -42,11 +42,13 @@ try {
     & $builder -m PyInstaller @shared --uac-admin --name "RimWorld-Autopilot-Setup" (Join-Path $projectRoot "autopilot_setup.py")
     if ($LASTEXITCODE -ne 0) { throw "RimWorld Autopilot Setup build failed." }
 
-    $releaseName = "RimWorld-Autopilot-0.0.3"
+    $version = (Get-Content -LiteralPath (Join-Path $projectRoot "VERSION") -Raw).Trim()
+    if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid release version: $version" }
+    $releaseName = "RimWorld-Autopilot-$version"
     $releaseDirectory = Join-Path $distribution $releaseName
     $resolvedDistribution = [IO.Path]::GetFullPath($distribution)
     $resolvedRelease = [IO.Path]::GetFullPath($releaseDirectory)
-    if (-not $resolvedRelease.StartsWith($resolvedDistribution, [StringComparison]::OrdinalIgnoreCase)) {
+    if (-not $resolvedRelease.StartsWith($resolvedDistribution.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
         throw "Release directory escaped the dist folder."
     }
     if (Test-Path -LiteralPath $releaseDirectory) {
@@ -54,10 +56,10 @@ try {
     }
     New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
     Get-ChildItem -LiteralPath $projectRoot -File |
-        Where-Object { ($_.Extension -in @(".py", ".ps1", ".cmd", ".md", ".txt")) -or ($_.Name -in @("LICENSE", "RIMAPI_UPSTREAM_COMMIT")) } |
+        Where-Object { ($_.Extension -in @(".py", ".ps1", ".cmd", ".md", ".txt")) -or ($_.Name -in @("LICENSE", "RIMAPI_UPSTREAM_COMMIT", "VERSION")) } |
         Where-Object { $_.Name -notin @("laya-control.json", "laya-preferences.json", "rimworld-autopilot.json", "autopilot-preferences.json") } |
         Copy-Item -Destination $releaseDirectory -Force
-    foreach ($folder in @("assets", "laya_gui", "tools", "vendor")) {
+    foreach ($folder in @("assets", "docs", "laya_gui", "tools", "vendor")) {
         Copy-Item -LiteralPath (Join-Path $projectRoot $folder) -Destination $releaseDirectory -Recurse -Force
     }
     Get-ChildItem -LiteralPath $releaseDirectory -Directory -Filter "__pycache__" -Recurse |
@@ -72,7 +74,7 @@ try {
         Remove-Item -Force
     Copy-Item -LiteralPath (Join-Path $distribution "RimWorld-Autopilot.exe") -Destination $releaseDirectory -Force
     Copy-Item -LiteralPath (Join-Path $distribution "RimWorld-Autopilot-Setup.exe") -Destination $releaseDirectory -Force
-    $archive = Join-Path $distribution "rimworld-autopilot-0.0.3.zip"
+    $archive = Join-Path $distribution "rimworld-autopilot-$version.zip"
     Compress-Archive -Path (Join-Path $releaseDirectory "*") -DestinationPath $archive -CompressionLevel Optimal -Force
 
     $innoCompiler = $innoCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
