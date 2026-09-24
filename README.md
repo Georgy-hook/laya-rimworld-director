@@ -11,7 +11,7 @@
 
 **Hand Laya the keys to your colony.** It reads the map, picks what matters next, and gives real in-game orders—from getting dinner on the table to sending a caravan or rallying everyone for a raid. Watch what it considered in the game, change its priorities in the desktop app, and see where the colony goes.
 
-**[Download for Windows](https://github.com/Georgy-hook/rimworld-autopilot/releases/download/v0.0.4/RimWorld-Autopilot-0.0.4-Setup.exe)** · [Quick install](#quick-install) · [Explore the features](#what-laya-can-do) · [Latest release](https://github.com/Georgy-hook/rimworld-autopilot/releases/tag/v0.0.4)
+**[Download for Windows](https://github.com/Georgy-hook/rimworld-autopilot/releases/latest/download/RimWorld-Autopilot-Installer.exe)** · [Quick install](#quick-install) · [Explore the features](#what-laya-can-do) · [Latest release](https://github.com/Georgy-hook/rimworld-autopilot/releases/latest)
 
 ## See Laya at work
 
@@ -70,12 +70,12 @@ The yellow bars show how Laya weighs the choices in front of it. The same view i
 
 You need **64-bit Windows 10 (version 1809 or newer) or Windows 11**, **RimWorld 1.6**, **Harmony**, and **Python 3.10–3.12**. An NVIDIA GPU is recommended for faster decisions; CPU mode is available. The first setup downloads Laya's model files, so it needs an internet connection and free disk space.
 
-1. Download and run [RimWorld-Autopilot-0.0.4-Setup.exe](https://github.com/Georgy-hook/rimworld-autopilot/releases/download/v0.0.4/RimWorld-Autopilot-0.0.4-Setup.exe). Choose your install folder and whether you want a desktop shortcut.
+1. Download and run the [latest Windows installer](https://github.com/Georgy-hook/rimworld-autopilot/releases/latest/download/RimWorld-Autopilot-Installer.exe). Choose your install folder and whether you want a desktop shortcut.
 2. On the final setup page, leave **Configure Python, the local model and the RimWorld mod now** selected. The assistant finds RimWorld, prepares the Python environment, downloads Laya, and installs the bundled RIMAPI mod.
 3. In RimWorld's mod list, enable **Harmony** before **RIMAPI — RimWorld Autopilot**, then restart the game.
 4. Load a colony, open **RimWorld Autopilot**, and click **Start Laya**. Use **Stop** in the app whenever you want to take over again.
 
-Windows may identify the installer as an unknown publisher because this open-source build is unsigned. Download it from the [GitHub release](https://github.com/Georgy-hook/rimworld-autopilot/releases/tag/v0.0.4) and check the file before running it. A copy of your save is a good starting point for trying new priorities.
+Windows may identify the installer as an unknown publisher because this open-source build is unsigned. Download it from the [GitHub release](https://github.com/Georgy-hook/rimworld-autopilot/releases/latest) and check the file before running it. A copy of your save is a good starting point for trying new priorities.
 
 The first setup fetches the public `convaiinnovations/laya` checkpoint; later runs use the local cache. If the cache is empty, the app can download the files again. Model weights are not packed into the installer.
 
@@ -118,6 +118,8 @@ To build the Windows app, ZIP, and installer, install Inno Setup 6.7+ and run:
 ```powershell
 .\Build-GUI.ps1
 ```
+
+The build also creates `dist/RimWorld-Autopilot-Installer.exe`, an identical copy of the full versioned installer. Attach that fixed-name file to every stable release so the [permanent download link](https://github.com/Georgy-hook/rimworld-autopilot/releases/latest/download/RimWorld-Autopilot-Installer.exe) keeps working. See the [release checklist](docs/RELEASING.md).
 
 The installer uses the compiled RIMAPI assembly in `vendor/RIMAPI/1.6/Assemblies`. For a manual install or preview run, see [Install.ps1](Install.ps1), [Start-Preview.ps1](Start-Preview.ps1), and [Start-Autonomous.ps1](Start-Autonomous.ps1). Changes by version are in [release notes](RELEASE_NOTES.md).
 

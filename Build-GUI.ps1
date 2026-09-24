@@ -84,7 +84,20 @@ try {
     & $innoCompiler $installerScript
     if ($LASTEXITCODE -ne 0) { throw "Windows installer build failed." }
 
-    Write-Host "GUI executables, release archive and standard Windows installer are ready in $distribution"
+    # Keep a fixed asset name for GitHub's /releases/latest/download/ URL.
+    # This is a copy of the full Inno installer, not the post-install assistant.
+    $versionedInstaller = Join-Path $distribution "$releaseName-Setup.exe"
+    $latestInstaller = Join-Path $distribution "RimWorld-Autopilot-Installer.exe"
+    if (-not (Test-Path -LiteralPath $versionedInstaller)) {
+        throw "Versioned Windows installer was not produced."
+    }
+    Copy-Item -LiteralPath $versionedInstaller -Destination $latestInstaller -Force
+    if ((Get-FileHash -LiteralPath $versionedInstaller -Algorithm SHA256).Hash -ne
+        (Get-FileHash -LiteralPath $latestInstaller -Algorithm SHA256).Hash) {
+        throw "Fixed-name installer does not match the versioned installer."
+    }
+
+    Write-Host "GUI executables, release archive, versioned installer and fixed-name installer are ready in $distribution"
 }
 finally {
     Pop-Location
