@@ -39,6 +39,58 @@ def raid(fighters, hostiles, defenses=()):
 
 
 class CombatScenarioTests(unittest.TestCase):
+    def test_wall_blocked_gun_is_not_counted_as_cover_even_inside_range(self):
+        shooter = fighter(1, distance=9, range_cells=25)
+        shooter["shootable_opponent_ids"] = []
+        hostile = {"id": 99, "kind_def": "GuineaPig", "health": 1.0,
+                   "position": {"x": 20, "z": 10}}
+        snapshot = raid([shooter], [hostile])
+        self.assertFalse(colony_combat.has_clear_shot(shooter, [hostile]))
+        context = bridge.combat_model_context(None, snapshot)
+        self.assertEqual(context["covering_guns"], "0/1 have clear firing lanes")
+        criteria = bridge.make_questions(snapshot)["threat_action"]["criteria"]
+        self.assertIn("focus_fire", criteria)
+        self.assertIn("advance_to_range", criteria)
+        self.assertIn("clear firing lane", criteria["hold_cover"])
+
+    def test_exposed_civilian_and_idle_guns_are_explicit_in_laya_context(self):
+        civilian = fighter(3, ranged=False, weapon=None, distance=4, health=0.42)
+        shooters = [fighter(1, distance=95, range_cells=37),
+                    fighter(2, distance=101, range_cells=26)]
+        snapshot = raid(shooters + [civilian], [{
+            "id": 99, "kind_def": "Drifter", "health": 1.0,
+            "weapon_def": "MeleeWeapon_Knife", "current_job": "AttackMelee",
+            "position": {"x": 20, "z": 10},
+        }])
+        context = bridge.combat_model_context(None, snapshot)
+        self.assertIn("0/2 guns have a clear firing lane", context["immediate_threat"])
+        criteria = bridge.make_questions(snapshot)["threat_action"]["criteria"]
+        self.assertIn("advance_to_range", criteria)
+        self.assertIn("must move around walls", criteria["firing_line"])
+        self.assertIn("unarmed", criteria["advance_to_range"])
+        self.assertIn("captured", criteria["hold_cover"])
+
+    def test_focus_fire_reissues_when_target_moves_out_of_range(self):
+        shooter = fighter(1, distance=60, range_cells=37)
+        shooter.update(is_drafted=True, current_job="AttackStatic", current_job_target_id=99)
+        snapshot = raid([shooter], [{"id": 99, "kind_def": "Raider", "health": 1.0,
+                                     "position": {"x": 70, "z": 10}}])
+        action = bridge.plan_action(snapshot, {"choice": "focus_fire"})
+        self.assertTrue(any(command.get("body", {}).get("tactic") == "focus_fire"
+                            for command in action["commands"]))
+
+    def test_focus_fire_reissues_when_wall_blocks_existing_attack_job(self):
+        shooters = [fighter(1, distance=9), fighter(2, distance=10)]
+        for shooter in shooters:
+            shooter.update(is_drafted=True, current_job="AttackStatic",
+                           current_job_target_id=99, shootable_opponent_ids=[])
+        snapshot = raid(shooters, [{"id": 99, "kind_def": "GuineaPig", "health": 1.0,
+                                    "position": {"x": 20, "z": 10}}])
+        action = bridge.plan_action(snapshot, {"choice": "focus_fire"})
+        tactic = next(command["body"] for command in action["commands"]
+                      if command.get("body", {}).get("tactic") == "focus_fire")
+        self.assertEqual(tactic["fighter_ids"], [1, 2])
+
     def test_compact_context_keeps_all_three_fighters_visible(self):
         class ShortWindowAgent:
             cfg = {"max_len": 512, "head_max_len": 192}
@@ -104,7 +156,7 @@ class CombatScenarioTests(unittest.TestCase):
         self.assertEqual(agent.questions, ["threat_action", "unsupported_charge", "melee_role_3"])
         self.assertIn("Only 0/2 guns can cover", colony_combat.available_tactics(snapshot)["melee_assault"])
         self.assertEqual(bridge.combat_model_context(agent, snapshot)["covering_guns"],
-                         "0/2 currently in firing range")
+                         "0/2 have clear firing lanes")
         action = bridge.plan_action(snapshot, decision)
         tactics = [row["body"] for row in action["commands"] if row.get("body", {}).get("tactic")]
         self.assertIn(("advance_to_range", [1, 2]),
@@ -125,6 +177,70 @@ class CombatScenarioTests(unittest.TestCase):
         tactic = next(row for row in action["commands"] if row["endpoint"] == "/api/v1/combat/tactic")
         self.assertEqual(tactic["body"]["fighter_ids"], [1])
         self.assertEqual(tactic["body"]["tactic"], "civilian_retreat")
+
+    def test_unarmed_colonist_gets_own_role_while_shooters_hold_cover(self):
+        class RoleAgent:
+            def __init__(self):
+                self.questions = []
+
+            def predict(self, state, questions):
+                question = next(iter(questions))
+                self.questions.append(question)
+                choice = {"threat_action": "hold_cover",
+                          "melee_role_3": "withdraw_and_regroup"}[question]
+                return {"answers": {question: {"choice": choice, "confidence": 0.7}}}
+
+        snapshot = raid(
+            [fighter(1, distance=35, range_cells=37),
+             fighter(2, distance=40, range_cells=26),
+             fighter(3, ranged=False, weapon=None, distance=2)],
+            [{"id": 99, "kind_def": "GuineaPig", "health": 0.7,
+              "position": {"x": 20, "z": 10}}],
+        )
+        agent = RoleAgent()
+        decision = bridge.decide(agent, snapshot, 0.0)
+        self.assertEqual(agent.questions, ["threat_action", "melee_role_3"])
+        self.assertEqual(decision["melee_roles"], {3: "withdraw_and_regroup"})
+        tactics = [row["body"] for row in bridge.plan_action(snapshot, decision)["commands"]
+                   if row.get("body", {}).get("tactic")]
+        self.assertIn(("hold_cover", [1, 2]),
+                      [(row["tactic"], row["fighter_ids"]) for row in tactics])
+        self.assertIn(("withdraw_and_regroup", [3]),
+                      [(row["tactic"], row["fighter_ids"]) for row in tactics])
+
+    def test_isolated_unarmed_role_exposes_support_gap_without_forcing_retreat(self):
+        class RoleAgent:
+            def __init__(self):
+                self.role_question = None
+                self.role_state = None
+
+            def predict(self, state, questions):
+                name = next(iter(questions))
+                if name.startswith("melee_role_"):
+                    self.role_question = questions[name]
+                    self.role_state = state
+                    selected = "withdraw_and_regroup"
+                else:
+                    selected = "hold_cover"
+                return {"answers": {name: {"choice": selected, "confidence": 0.8}}}
+
+        shooters = [fighter(1, distance=112, range_cells=37),
+                    fighter(2, distance=116, range_cells=26)]
+        shooters[0]["position"] = {"x": 130, "z": 100}
+        shooters[1]["position"] = {"x": 134, "z": 100}
+        isolated = fighter(3, ranged=False, weapon=None, distance=3)
+        isolated["position"] = {"x": 20, "z": 100}
+        enemy = {"id": 99, "kind_def": "GuineaPig", "health": 1.0,
+                 "position": {"x": 23, "z": 100}}
+        agent = RoleAgent()
+        decision = bridge.decide(agent, raid(shooters + [isolated], [enemy]), 0.0)
+        self.assertEqual(decision["melee_roles"], {3: "withdraw_and_regroup"})
+        self.assertGreater(agent.role_state["role_target"]["nearest_gun_cells"], 100)
+        criteria = agent.role_question["criteria"]
+        self.assertIn("0/2 guns can cover", criteria["melee_assault"])
+        self.assertIn("Regroup", criteria["guard_shooters"])
+        self.assertIn("withdraw_and_regroup", criteria)
+        self.assertNotIn("lure_enemy", criteria)
 
     def test_staging_raid_offers_weapon_equipping_as_a_real_choice(self):
         snapshot = raid(

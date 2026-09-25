@@ -70,6 +70,8 @@ namespace RIMAPI.Models
         public float ManhunterOnTameFailChance { get; set; }
         public bool Reproductive { get; set; }
         public bool CanBeDesignatedForTaming { get; set; }
+        public bool RequiresPen { get; set; }
+        public bool HasSuitableEnclosedPen { get; set; }
         public float MarketValue { get; set; }
         public int MeatAmount { get; set; }
         public int LeatherAmount { get; set; }

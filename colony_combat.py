@@ -214,6 +214,20 @@ def hostile_is_preparing(row: dict[str, Any]) -> bool:
     )
 
 
+def has_clear_shot(shooter: dict[str, Any], hostiles: list[dict[str, Any]]) -> bool:
+    """Range alone is not a firing lane: walls and closed doors can block it."""
+    if not shooter.get("has_ranged_weapon"):
+        return False
+    shootable = shooter.get("shootable_opponent_ids")
+    if shootable is not None:
+        live_ids = {int(row["id"]) for row in hostiles if row.get("id") is not None
+                    and not row.get("is_dead") and not row.get("is_downed")}
+        return bool(live_ids.intersection(int(pawn_id) for pawn_id in shootable))
+    # Older installed RIMAPI builds exposed only distance. Keep their behavior
+    # while the updated combat-state field is being deployed.
+    return 2 < float(shooter.get("distance_to_nearest_opponent") or 9999) <= float(shooter.get("weapon_range") or 0) + 1
+
+
 def available_tactics(snapshot: dict[str, Any]) -> dict[str, str]:
     combat = snapshot.get("combat", {})
     hostiles = [row for row in combat.get("hostiles", []) if not row.get("is_dead") and not row.get("is_downed")]
@@ -241,18 +255,18 @@ def available_tactics(snapshot: dict[str, Any]) -> dict[str, str]:
         hostile_is_preparing(row) for row in hostiles
     )
 
-    in_range = [row for row in ranged if 2 < float(row.get("distance_to_nearest_opponent") or 9999)
-                <= float(row.get("weapon_range") or 0) + 1]
+    in_range = [row for row in ranged if has_clear_shot(row, hostiles)]
+    exposed_civilians = [row for row in fighters if not row.get("weapon_def")
+                         and float(row.get("distance_to_nearest_opponent") or 9999) <= 18]
     contact = [row for row in ranged if float(row.get("distance_to_nearest_opponent") or 9999) <= 2]
     names: list[str] = ["hold_cover"] if ranged and len(contact) < len(ranged) else []
     if armed_melee:
         names += ["melee_assault", "melee_hold_line"]
         if len(armed_melee) >= 2:
             names.append("coordinate_melee_roles")
-    if in_range:
+    if ranged and (in_range or len(contact) < len(ranged)):
         names.append("focus_fire")
-    if ranged and any(float(row.get("distance_to_nearest_opponent") or 9999)
-                      > float(row.get("weapon_range") or 0) + 1 for row in ranged):
+    if ranged and len(in_range) < len(ranged):
         names.append("advance_to_range")
     retreat_distance = max(18.0, min(45.0, max(
         (float(row.get("weapon_range") or 0) + 4.0 for row in hostiles if row.get("has_ranged_weapon")),
@@ -326,11 +340,17 @@ def available_tactics(snapshot: dict[str, Any]) -> dict[str, str]:
     for name in names:
         if name not in result:
             description = TACTICS[name]["description"]
+            if name in {"hold_cover", "firing_line"} and len(in_range) < len(ranged):
+                description = (f"Hold cover: only {len(in_range)}/{len(ranged)} guns have a clear firing lane now; "
+                               "blocked or out-of-range guns must move around walls before they can shoot."
+                               + (" An unarmed ally may be captured." if exposed_civilians else ""))
+            elif name in {"focus_fire", "advance_to_range"} and exposed_civilians:
+                description = (f"{len(exposed_civilians)} unarmed ally(s) threatened nearby. "
+                               "Move distant guns into range and order civilian retreat; guns may be exposed "
+                               "or arrive too late.")
             if name == "melee_assault" and ranged:
                 ready_support = sum(
-                    float(row.get("distance_to_nearest_opponent") or 9999)
-                    <= float(row.get("weapon_range") or 0) + 1
-                    and float(row.get("distance_to_nearest_opponent") or 9999) > 2
+                    has_clear_shot(row, hostiles)
                     for row in ranged
                 )
                 weakest_skill = min(int(row.get("melee_skill") or 0) for row in armed_melee)
@@ -341,8 +361,8 @@ def available_tactics(snapshot: dict[str, Any]) -> dict[str, str]:
                                f"Only {ready_support}/{len(ranged)} guns can cover. "
                                "An unsupported low-skill fighter may lose a limb or die.")
             if name == "focus_fire" and len(in_range) < len(ranged):
-                description += (f" Only {len(in_range)}/{len(ranged)} armed shooters can fire now; "
-                                "other selected shooters will advance in short trap-free steps, which exposes them.")
+                description += (f" Only {len(in_range)}/{len(ranged)} armed shooters have a clear shot now; "
+                                "the rest will seek trap-free firing lanes, which may expose them.")
             if name == "focus_fire" and len(in_range) < len(hostiles):
                 description += " Risk: fewer shooters are in range than active enemies; other fighters may be left exposed."
             if name in {"focus_fire", "hold_cover", "firing_line"} and any(

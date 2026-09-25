@@ -60,8 +60,8 @@ RESPONSE_OPTIONS: dict[str, dict[str, str]] = {
         "skip_trade": "Skip a trader that cannot buy the colony's surplus or offer a useful purchase at a safe price.",
     },
     "arrival": {
-        "rescue_arrival": "Rescue a downed non-hostile arrival to a real medical bed when safe.",
-        "evaluate_recruit": "Evaluate skills, health, ideology, traits, food and housing before accepting a new person.",
+        "rescue_arrival": "Pass a downed non-hostile arrival to the colony's live rescue choices; this event acknowledgement alone does not order a rescue.",
+        "evaluate_recruit": "Review the join opportunity; an actual joiner letter is answered separately with food, housing and skills context.",
         "observe_event": "Do not attack or capture a neutral arrival without a deliberate reason.",
     },
     "resources": {
@@ -183,6 +183,41 @@ def response_options(event: dict[str, Any], context: dict[str, Any]) -> dict[str
 
 
 def event_context_for_model(event: dict[str, Any], context: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any]:
+    if event.get("family") == "trade":
+        # The raw incident and trader rows include every stock item twice. Laya's
+        # short decision context then loses the colony's needs and the prices.
+        resources = snapshot.get("map", {}).get("resources") or {}
+        colonists = snapshot.get("colonists") or []
+        hunger = [float(row["hunger"]) for row in colonists
+                  if isinstance(row.get("hunger"), (int, float))]
+        traders = []
+        for trader in (context.get("trade_opportunities") or [])[:4]:
+            preview = trader.get("preview") or {}
+            traders.append({
+                "id": trader.get("id"), "name": trader.get("name"),
+                "silver": preview.get("colony_silver"),
+                "reserve": preview.get("minimum_silver_reserve"),
+                "trader_silver": preview.get("trader_silver"),
+                "can_sell": [
+                    f"{row.get('category')} {row.get('example')} x{row.get('maximum_units')} @ {float(row.get('unit_price') or 0):.1f} silver"
+                    for row in (preview.get("sale_options") or [])[:8]
+                ],
+                "can_buy": [
+                    f"{row.get('category')} {row.get('example')} x{row.get('maximum_units')} @ {float(row.get('unit_price') or 0):.1f} silver"
+                    for row in (preview.get("purchase_options") or [])[:9]
+                ],
+            })
+        return {
+            "event": {"family": "trade", "name": event.get("name"),
+                      "trader_kind": event.get("trader_kind")},
+            "colony": {"population": len(colonists), "food": resources.get("food"),
+                       "meals": resources.get("meals"), "raw_food": resources.get("raw_food"),
+                       "medicine": resources.get("medicine"),
+                       "lowest_hunger": round(min(hunger), 2) if hunger else None,
+                       "hostiles": len(snapshot.get("combat", {}).get("hostiles") or [])},
+            "traders": traders,
+            "tradeoff": "Buying food or medicine improves survival but costs scarce silver; skipping preserves silver and the trader may depart.",
+        }
     return {
         "event": event,
         "active_conditions": context.get("active_conditions") or [],

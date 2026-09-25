@@ -21,7 +21,7 @@ import laya_preferences
 from .i18n import PRIORITY_TEXT, QUESTION_TEXT, doctrine_view, humanize, risk_text, tr
 from .services import (
     APP_NAME, BASE_DIR, DATA_DIR, FEEDBACK_PATH, OBSERVER_PID_PATH, OBSERVER_STATUS_PATH, PREFERENCES_PATH, RESOURCE_DIR,
-    append_feedback, export_bundle, export_history, load_config, read_director_health, read_pid, request_json,
+    active_map_key, append_feedback, export_bundle, export_history, load_config, read_director_health, read_pid, request_json,
     start_director, start_observer as launch_observer, stop_director, tail_jsonl,
     timestamped_export_name,
 )
@@ -47,6 +47,8 @@ class ControlCenter(tk.Tk):
         self.records: list[dict[str, Any]] = []
         self.last_log_signature: tuple[int, int] | None = None
         self.game_online = False
+        self.active_map_key: str | None = None
+        self.active_game_tick: int | None = None
         self.current_page = "overview"
         self.animation_tick = 0
         self.animation_started = time.perf_counter()
@@ -388,6 +390,7 @@ class ControlCenter(tk.Tk):
         if name not in self.pages:
             name = "overview"
         self.current_page = name
+        self.last_log_signature = None
         for page in self.pages.values():
             page.pack_forget()
         self.pages[name].pack(fill="both", expand=True)
@@ -613,8 +616,13 @@ class ControlCenter(tk.Tk):
         try:
             state = json.loads(self.state_path.read_text(encoding="utf-8-sig"))
             maps = state.get("maps") or {}
-            return next(reversed(maps.values())) if maps else {}
-        except (OSError, json.JSONDecodeError, StopIteration):
+            current = maps.get(self.active_map_key, {}) if self.active_map_key else {}
+            last_seen = current.get("last_seen_tick")
+            if (self.active_game_tick is not None and last_seen is not None
+                    and self.active_game_tick + 100 < int(last_seen)):
+                return {}
+            return current
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
             return {}
 
     def _refresh_doctrine(self, map_state: dict[str, Any]) -> None:
@@ -664,12 +672,20 @@ class ControlCenter(tk.Tk):
         self.direction_catalog.configure(state="disabled")
 
     def _probe_game(self) -> None:
+        map_key = None
+        game_tick = None
         try:
             result = request_json(f"{str(self.config_data['api_url']).rstrip('/')}/api/v1/game/state")
             online = bool(result.get("success"))
+            if online:
+                game_tick = int((result.get("data") or {}).get("game_tick") or 0)
+                maps = request_json(f"{str(self.config_data['api_url']).rstrip('/')}/api/v1/maps")
+                map_key = active_map_key(maps)
         except (OSError, URLError, ValueError, json.JSONDecodeError):
             online = False
         self.game_online = online
+        self.active_map_key = map_key
+        self.active_game_tick = game_tick
         self.after(0, lambda: self.game_chip.configure(text=tr(self.language, "game_online" if online else "game_offline"), fg=status_color(online)))
 
     def _refresh_history(self) -> None:
@@ -681,7 +697,10 @@ class ControlCenter(tk.Tk):
         if signature == self.last_log_signature and self.records:
             return
         self.last_log_signature = signature
-        self.records = tail_jsonl(self.log_path)
+        # The director's technical records can contain large map snapshots.
+        # Keep the overview responsive; load a wider slice only on History.
+        self.records = tail_jsonl(self.log_path, limit=30, max_bytes=4_000_000) if self.current_page == "history" else tail_jsonl(
+            self.log_path, limit=1, max_bytes=1_000_000)
         selected = self.tree.selection() if hasattr(self, "tree") else ()
         selected_index = int(selected[0]) if selected else None
         self.tree.delete(*self.tree.get_children())
@@ -696,7 +715,8 @@ class ControlCenter(tk.Tk):
             choice = humanize(decision.get("choice") or row.get("error") or "—", self.language)
             confidence = decision.get("confidence")
             confidence_text = f"{float(confidence) * 100:.0f}%" if confidence is not None else "—"
-            result_text = tr(self.language, "done") if result.get("applied") is True else tr(self.language, "error") if row.get("error") else tr(self.language, "not_applied")
+            done = result.get("applied") is True or (result.get("applied") is None and result.get("success") is True)
+            result_text = tr(self.language, "done") if done else tr(self.language, "error") if row.get("error") else tr(self.language, "not_applied")
             self.tree.insert("", "end", iid=str(index), values=(timestamp, choice, confidence_text, result_text))
         if self.records:
             target = str(selected_index if selected_index is not None and selected_index < len(self.records) else len(self.records) - 1)
@@ -705,10 +725,14 @@ class ControlCenter(tk.Tk):
             self.show_selected()
             latest = self.records[-1]
             latest_decision = latest.get("decision") or {}
-            self.latest_choice.configure(text=humanize(latest_decision.get("choice") or "—", self.language))
+            self.latest_choice.configure(text=humanize(latest_decision.get("choice") or "—", self.language)
+                                         if self.active_map_key else tr(self.language, "waiting"))
             confidence = latest_decision.get("confidence")
             suffix = f"{tr(self.language, 'confidence')}: {float(confidence) * 100:.0f}%" if confidence is not None else ""
             self.latest_result.configure(text=suffix)
+        else:
+            self.latest_choice.configure(text=tr(self.language, "waiting"))
+            self.latest_result.configure(text="")
 
     def show_selected(self, _event=None) -> None:
         if not hasattr(self, "tree"):

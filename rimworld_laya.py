@@ -21,7 +21,7 @@ from laya_decisions import ask_laya_choice
 
 DEFAULT_API_URL = "http://localhost:8765"
 DEFAULT_MODEL = "convaiinnovations/laya"
-__version__ = "0.0.4"
+__version__ = "0.0.5"
 SAFE_WORK_TYPES = {
     "prioritize_cooking": "Cooking",
     "prioritize_growing": "Growing",
@@ -345,6 +345,8 @@ def collect_snapshot(client: RimApiClient) -> dict[str, Any]:
                 "minimum_handling_skill": int(first_number(row.get("minimum_handling_skill"))),
                 "manhunter_on_tame_fail_chance": round(first_number(row.get("manhunter_on_tame_fail_chance")), 3),
                 "reproductive": bool(row.get("reproductive")),
+                "requires_pen": row.get("requires_pen"),
+                "has_suitable_enclosed_pen": bool(row.get("has_suitable_enclosed_pen")),
                 "pregnant": bool(row.get("pregnant")),
                 "downed": bool(row.get("downed")),
                 "dead": bool(row.get("dead")),
@@ -368,6 +370,8 @@ def collect_snapshot(client: RimApiClient) -> dict[str, Any]:
                 "reproductive": bool(row.get("reproductive")),
                 "pregnant": bool(row.get("pregnant")),
                 "can_tame": bool(row.get("can_be_designated_for_taming")),
+                "requires_pen": row.get("requires_pen"),
+                "has_suitable_enclosed_pen": bool(row.get("has_suitable_enclosed_pen")),
                 "market_value": round(first_number(row.get("market_value")), 1),
                 "meat_amount": int(first_number(row.get("meat_amount"))),
                 "leather_amount": int(first_number(row.get("leather_amount"))),
@@ -466,10 +470,8 @@ def decision_state(snapshot: dict[str, Any]) -> dict[str, Any]:
                 "downed_allies": sum(bool(row.get("is_downed")) for row in combat.get("colonists", [])),
                 "allies_in_mental_break": sum(bool(row.get("is_in_mental_state")) for row in combat.get("colonists", [])),
                 "allied_gear": allied_gear[:12],
-                "shooters_in_range": sum(bool(row.get("has_ranged_weapon")) and
-                                         first_number(row.get("distance_to_nearest_opponent"), 9999)
-                                         <= first_number(row.get("weapon_range")) + 1
-                                         for row in available_allies),
+                "shooters_with_clear_shot": sum(combat_planner.has_clear_shot(row, active_enemies)
+                                                for row in available_allies),
             },
             "combat_tradeoff": (
                 "Keeping a wounded fighter may cost that fighter's life, but withdrawing them removes firepower "
@@ -534,10 +536,15 @@ def combat_model_context(agent: Any, snapshot: dict[str, Any], *,
     enemy_gear = sorted({str(row.get("weapon_def") or "unarmed") for row in enemies})
     enemy_kinds = sorted({str(row.get("kind_def") or row.get("name") or "enemy") for row in enemies})
     shooters = [row for row in available if row.get("has_ranged_weapon")]
-    covering_now = sum(
-        first_number(row.get("distance_to_nearest_opponent"), 9999)
-        <= first_number(row.get("weapon_range")) + 1
-        for row in shooters
+    covering_now = sum(combat_planner.has_clear_shot(row, active) for row in shooters)
+    exposed_civilians = [row for row in available if not row.get("weapon_def")
+                         and first_number(row.get("distance_to_nearest_opponent"), 9999) <= 18]
+    immediate_threat = (
+        f"{len(exposed_civilians)} unarmed ally(s) within 18 cells of an enemy; "
+        f"{covering_now}/{len(shooters)} guns have a clear firing lane. Holding a blocked line does not "
+        "protect the civilian; moving around walls may expose shooters but can prevent injury or kidnapping. "
+        "Advancing guns can expose them; withdrawing the civilian may separate the squad."
+        if exposed_civilians else None
     )
     def fighter(row: dict[str, Any]) -> str:
         needs = welfare.get(row.get("id")) or {}
@@ -548,6 +555,7 @@ def combat_model_context(agent: Any, snapshot: dict[str, Any], *,
                 f"{round(first_number(row.get('bleeding_rate')) * 100)}/{gear}/"
                 f"{round(first_number(row.get('weapon_range')))}/"
                 f"{round(first_number(row.get('distance_to_nearest_opponent'), 9999))}/"
+                f"{int(combat_planner.has_clear_shot(row, active))}/"
                 f"{round(first_number(row.get('moving'), 1) * 100)}/"
                 f"{int(first_number(row.get('melee_skill')))}/"
                 f"{int(first_number(row.get('shooting_skill')))}/"
@@ -570,14 +578,16 @@ def combat_model_context(agent: Any, snapshot: dict[str, Any], *,
         "paused": bool(snapshot["game"].get("is_paused")),
         "phase": "preparing" if active and all(combat_planner.hostile_is_preparing(row) for row in active) else "assault",
         "forces": (f"{len(available)} allies, {sum(bool(row.get('has_ranged_weapon')) for row in available)} guns, "
-                   f"{sum(bool(row.get('weapon_def')) and not row.get('has_ranged_weapon') for row in available)} melee; "
+                   f"{sum(bool(row.get('weapon_def')) and not row.get('has_ranged_weapon') for row in available)} melee, "
+                   f"{sum(not bool(row.get('weapon_def')) for row in available)} unarmed; "
                    f"{len(active)} enemies; {sum(bool(row.get('is_downed')) for row in combat.get('colonists', []))} allies down"),
-        "covering_guns": f"{covering_now}/{len(shooters)} currently in firing range",
+        "covering_guns": f"{covering_now}/{len(shooters)} have clear firing lanes",
+        **({"immediate_threat": immediate_threat} if immediate_threat else {}),
         "ally_weapons": allied_gear,
         "enemy_weapons": enemy_gear,
         "enemy_kinds": enemy_kinds,
         "enemy_jobs": sorted({str(row.get("current_job") or row.get("lord_toil_name") or "unknown") for row in active})[:5],
-        "fighter_format": "id:hp%/bleed%/weapon#/range/dist/move%/melee/shoot/armor%",
+        "fighter_format": "id:hp%/bleed%/weapon#/range/dist/clear-shot(1|0)/move%/melee/shoot/armor%",
         "hostile_format": "id:kind#/hp%/weapon#/range/dist/melee/armor%",
         "fighters": [fighter(row) for row in fighters],
         "hostiles": [hostile(row) for row in enemies],
@@ -609,7 +619,10 @@ def combat_model_context(agent: Any, snapshot: dict[str, Any], *,
         "fighter_format": state["fighter_format"],
         "fighters": [fighter(row) for row in fighters[:3]],
         "hostiles": [hostile(row) for row in enemies[:2]],
-        "risk": "Injured fighters may die; withdrawal saves them but reduces firepower.",
+        "risk": (f"Unarmed ally near enemy; {covering_now}/{len(shooters)} guns have clear shots. "
+                 "Walls block fire; moving to a lane exposes guns, but waiting risks capture."
+                 if immediate_threat else
+                 "Injured fighters may die; withdrawal saves them but reduces firepower."),
     }
     if role_target is not None:
         compact["role_target"] = role_target
@@ -780,9 +793,9 @@ def choose_worker(colonists: list[dict[str, Any]], work: str) -> dict[str, Any] 
         priority = priorities.get(work)
         if first_number(colonist.get("health")) < 0.75 or first_number(colonist.get("bleeding_rate")) > 0.0 or colonist.get("downed"):
             continue
-        # RIMAPI omits work types that the pawn cannot perform. Treating a
-        # missing row as enabled selected incapable pawns and produced an
-        # endless series of rejected priority changes.
+        # A missing row is not evidence that this pawn can perform the work.
+        # RIMAPI now includes zero-priority rows for capable workers so Laya
+        # can explicitly re-enable those jobs without guessing capability.
         if not isinstance(priority, dict) or priority.get("disabled"):
             continue
         eligible.append(colonist)
@@ -830,8 +843,8 @@ def decide(agent: Any, snapshot: dict[str, Any], confidence_threshold: float) ->
                     if not row.get("is_dead") and not row.get("is_downed") and not row.get("is_in_mental_state")]
         swords = [row for row in fighters if row.get("weapon_def") and not row.get("has_ranged_weapon")]
         guns = [row for row in fighters if row.get("has_ranged_weapon")]
-        covering = [row for row in guns if first_number(row.get("distance_to_nearest_opponent"), 9999)
-                    <= first_number(row.get("weapon_range")) + 1]
+        covering = [row for row in guns if combat_planner.has_clear_shot(
+            row, snapshot["combat"].get("hostiles") or [])]
         if swords and guns and not covering and min(
             first_number(row.get("distance_to_nearest_opponent"), 9999) for row in swords
         ) > 12:
@@ -914,31 +927,58 @@ def decide(agent: Any, snapshot: dict[str, Any], confidence_threshold: float) ->
         melee_fighters = [
             pawn for pawn in snapshot["combat"].get("colonists", [])
             if not pawn.get("is_dead") and not pawn.get("is_downed") and not pawn.get("is_in_mental_state")
-            and pawn.get("weapon_def") and not pawn.get("has_ranged_weapon")
+            and not pawn.get("has_ranged_weapon")
         ]
         role_raw: dict[str, Any] = {}
         has_shooters = any(pawn.get("has_ranged_weapon") and not pawn.get("is_dead")
                            and not pawn.get("is_downed") and not pawn.get("is_in_mental_state")
                            for pawn in snapshot["combat"].get("colonists", []))
+        supporting_guns = [row for row in snapshot["combat"].get("colonists", [])
+                           if row.get("has_ranged_weapon") and not row.get("is_dead")
+                           and not row.get("is_downed") and not row.get("is_in_mental_state")]
+        active_enemies = [row for row in snapshot["combat"].get("hostiles", [])
+                          if not row.get("is_dead") and not row.get("is_downed")]
         for pawn in melee_fighters:
             mobile = first_number(pawn.get("moving"), 1) >= 0.65
+            pawn_pos = pawn.get("position") or {}
+            support_gap = min((
+                ((first_number(pawn_pos.get("x")) - first_number((gun.get("position") or {}).get("x"))) ** 2
+                 + (first_number(pawn_pos.get("z")) - first_number((gun.get("position") or {}).get("z"))) ** 2) ** 0.5
+                for gun in supporting_guns if pawn_pos and gun.get("position")
+            ), default=9999.0)
+            clear_guns = sum(combat_planner.has_clear_shot(gun, active_enemies) for gun in supporting_guns)
+            isolated = not pawn.get("weapon_def") and has_shooters and support_gap > 12
             melee_options = {
                 ("guard_shooters" if has_shooters else "melee_hold_line"):
-                    "Stay with allies and intercept enemies that close in; this preserves the group but may let distant enemies attack first.",
+                    (f"Regroup with armed allies {support_gap:.0f} cells away; if isolated and threatened, retreat first. "
+                     "Intercept only when near the shooters." if isolated else
+                     "Stay with nearby shooters and intercept enemies that close in; this risks close combat."),
             }
             if has_shooters:
-                melee_options["screen_melee"] = "Intercept nearby enemies to protect allies; this risks the fighter in a close fight."
+                melee_options["screen_melee"] = (
+                    f"Screen the armed group; they are {support_gap:.0f} cells away and {clear_guns}/{len(supporting_guns)} "
+                    "can shoot now. An isolated fighter must regroup first." if isolated else
+                    "Intercept enemies close to the shooters; the screen risks injury in melee."
+                )
             if mobile:
                 melee_options["melee_assault"] = (
-                    "Attack the chosen enemy now. A long charge can expose this fighter to gunfire or stronger melee enemies; allies may cover them."
+                    f"Attack now; {clear_guns}/{len(supporting_guns)} guns can cover from here, "
+                    f"nearest shooter {support_gap:.0f} cells away. "
+                    "An unarmed fighter can be downed or killed before help arrives."
                 )
-                if first_number(pawn.get("distance_to_nearest_opponent"), 9999) <= 20:
+                if (first_number(pawn.get("distance_to_nearest_opponent"), 9999) <= 20
+                        and (not supporting_guns or (support_gap <= 30
+                                 and any(first_number(gun.get("distance_to_nearest_opponent"), 9999)
+                                         <= first_number(gun.get("weapon_range")) + 12
+                                         for gun in supporting_guns)))):
                     melee_options["lure_enemy"] = (
                         "Draw the nearest enemy into allied range with short trap-free moves, staying close enough to keep pursuit. "
                         "If the enemy ignores the lure, the fighter may contribute no damage while allies are exposed."
                     )
                 melee_options["withdraw_and_regroup"] = (
-                    "Withdraw this fighter from danger. They may survive, but the remaining allies lose protection and may be overwhelmed."
+                    ("Retreat from the enemy and rejoin distant gunmen; this may save an isolated unarmed colonist, "
+                     "but the enemy may follow." if isolated else
+                     "Withdraw this fighter from danger. They may survive, but nearby allies lose protection.")
                 )
             question_id = f"melee_role_{int(pawn['id'])}"
             melee_question = {question_id: {
@@ -958,6 +998,8 @@ def decide(agent: Any, snapshot: dict[str, Any], confidence_threshold: float) ->
                 "movement": first_number(pawn.get("moving"), 1),
                 "distance_to_enemy": first_number(pawn.get("distance_to_nearest_opponent"), 9999),
                 "weapon": pawn.get("weapon_def"),
+                "nearest_gun_cells": round(support_gap),
+                "guns_with_clear_shot": f"{clear_guns}/{len(supporting_guns)}",
             }
             role_state = combat_model_context(agent, snapshot, role_target=role_target, assigned_roles=melee_roles.copy())
             selected_role, prediction = ask_combat_choice(agent, role_state, question_id, melee_question[question_id])
@@ -1098,7 +1140,7 @@ def melee_support_commands(snapshot: dict[str, Any], decision: dict[str, Any],
     """Apply every model-assigned melee role during the same combat cycle."""
     melee = [pawn for pawn in snapshot["combat"].get("colonists", [])
              if not pawn.get("is_dead") and not pawn.get("is_downed") and not pawn.get("is_in_mental_state")
-             and pawn.get("weapon_def") and not pawn.get("has_ranged_weapon")
+             and not pawn.get("has_ranged_weapon")
              and int(pawn.get("id", -1)) not in active_ids]
     if not melee or target_id is None:
         return [], active_ids
@@ -1107,14 +1149,15 @@ def melee_support_commands(snapshot: dict[str, Any], decision: dict[str, Any],
     groups: dict[str, list[dict[str, Any]]] = {}
     for pawn in melee:
         pawn_id = int(pawn["id"])
+        pawn_default_role = "withdraw_and_regroup" if not pawn.get("weapon_def") else default_role
         role = str(assigned_roles.get(pawn_id) or assigned_roles.get(str(pawn_id))
-                   or decision.get("melee_role") or default_role)
+                   or decision.get("melee_role") or pawn_default_role)
         if role not in {"guard_shooters", "screen_melee", "melee_assault", "melee_hold_line",
                         "lure_enemy", "withdraw_and_regroup"}:
-            role = default_role
+            role = pawn_default_role
         if (role in {"melee_assault", "lure_enemy", "withdraw_and_regroup"}
                 and first_number(pawn.get("moving"), 1) < 0.65):
-            role = default_role
+            role = pawn_default_role
         groups.setdefault(role, []).append(pawn)
     commands = []
     for role, pawns in groups.items():
@@ -1349,10 +1392,17 @@ def plan_action(snapshot: dict[str, Any], decision: dict[str, Any]) -> dict[str,
             return {"kind": "commands", "description": "Withdraw vulnerable fighters", "commands": commands} if commands else {
                 "kind": "noop", "description": "No healthy fighter was selected for the tactic"
             }
-        if choice == "focus_fire" and all(
-            pawn.get("is_drafted") and pawn.get("current_job") == "AttackStatic"
-            and pawn.get("current_job_target_id") == target_id for pawn in fighters
-        ):
+        def already_shooting(pawn: dict[str, Any]) -> bool:
+            if (not pawn.get("is_drafted") or pawn.get("current_job") != "AttackStatic"
+                    or pawn.get("current_job_target_id") != target_id):
+                return False
+            shootable = pawn.get("shootable_opponent_ids")
+            if shootable is not None:
+                return target_id in {int(opponent_id) for opponent_id in shootable}
+            return (first_number(pawn.get("distance_to_nearest_opponent"), 9999)
+                    <= first_number(pawn.get("weapon_range")))
+
+        if choice == "focus_fire" and all(already_shooting(pawn) for pawn in fighters):
             commands = reserve_commands + melee_commands + ([resume_command] if resume_command else [])
             if commands:
                 return {"kind": "commands", "description": "Continue focus fire with simultaneous support", "commands": commands}
@@ -1617,8 +1667,23 @@ def apply_action(client: RimApiClient, action: dict[str, Any]) -> Any:
 
 def append_log(path: Path, record: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+    line = json.dumps(record, ensure_ascii=False, default=str) + "\n"
+    for attempt in range(8):
+        try:
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(line)
+            return
+        except PermissionError:
+            # Windows readers can briefly hold a sharing lock while the GUI
+            # tails the history. A missed log line must not kill the director.
+            time.sleep(0.08 * (attempt + 1))
+    spill = path.with_name(path.stem + ".spill.jsonl")
+    try:
+        with spill.open("a", encoding="utf-8") as handle:
+            handle.write(line)
+        print(f"Primary decision log is locked; record saved to {spill}", file=sys.stderr, flush=True)
+    except OSError as exc:
+        print(f"Decision log unavailable at {path} and {spill}: {exc}", file=sys.stderr, flush=True)
 
 
 def print_json(value: Any) -> None:

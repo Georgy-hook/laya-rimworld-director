@@ -86,6 +86,25 @@ namespace RIMAPI.Models
         public int MaximumSpend { get; set; } = 2000;
     }
 
+    public class LiveTradeCategoryDto
+    {
+        public string Category { get; set; }
+        public string Example { get; set; }
+        public int MaximumUnits { get; set; }
+        public float UnitPrice { get; set; }
+    }
+
+    public class LiveTradePreviewDto
+    {
+        public string TraderId { get; set; }
+        public int ColonySilver { get; set; }
+        public int TraderSilver { get; set; }
+        public int MinimumSilverReserve { get; set; }
+        public int MaximumSpend { get; set; }
+        public System.Collections.Generic.List<LiveTradeCategoryDto> SaleOptions { get; set; } = new System.Collections.Generic.List<LiveTradeCategoryDto>();
+        public System.Collections.Generic.List<LiveTradeCategoryDto> PurchaseOptions { get; set; } = new System.Collections.Generic.List<LiveTradeCategoryDto>();
+    }
+
     public class LiveTradeResponseDto
     {
         public string TraderId { get; set; }

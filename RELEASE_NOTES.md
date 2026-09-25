@@ -1,3 +1,13 @@
+# 0.0.5 — Better shelter, live trade and responsive defense
+
+- Added indoor-bed reassignment: when completed roofed beds are available, Laya can move colonists out of outdoor beds and sleeping spots. New real beds are planned inside finished rooms rather than scattered outside.
+- Expanded recruitment preparation with a small prison plan, live rescue choices for downed neutral arrivals, and more explicit context for join opportunities, food and housing costs.
+- Improved trader previews and compact trade context so Laya can compare actual affordable goods, prices and colony needs before buying or selling. The bridge re-checks live trade availability before committing an order.
+- Tightened construction siting against existing rooms, blueprints and door access, and made early work priorities and survival trade-offs more visible to the model.
+- Fixed ranged tactics that could leave shooters idle behind walls: the mod checks real line of sight, finds trap-free firing cells or advances in short steps, and regroups an isolated unarmed guard. Existing `AttackStatic` orders no longer count as active fire when a wall blocks the target.
+- Improved desktop history loading and active-map state after a save reload. The English playtest log now records seven colony runs and a focused combat replay.
+- Verification: 255 Python tests, a zero-warning RIMAPI 1.6 build, and a live two-squirrel manhunter replay. In that replay both shooters ultimately attacked and the wounded colonist was tended. It did not exactly reproduce the original two-gun wall obstruction; long-term colony growth remains unproven.
+
 # 0.0.4 — Laya-directed choices, squad combat and the first promo
 
 - Updated the local Laya SDK pin to 0.3.7. Decision input is checked against the actual tokenizer; large option sets use bounded comparisons so late options remain reachable, and one-option questions are resolved without calling the model.

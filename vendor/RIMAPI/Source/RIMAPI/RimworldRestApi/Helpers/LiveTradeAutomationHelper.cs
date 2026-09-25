@@ -11,6 +11,11 @@ namespace RIMAPI.Helpers
 {
     public static class LiveTradeAutomationHelper
     {
+        private static readonly string[] SaleCategories =
+            { "drugs", "apparel", "art", "animals", "food", "leather", "weapons", "gold" };
+        private static readonly string[] PurchasePriorities =
+            { "slaves", "livestock", "medicine", "advanced_components", "components", "food", "armor", "weapons", "plasteel" };
+
         public static ApiResult<List<LiveTraderDto>> GetOpportunities(int mapId)
         {
             try
@@ -52,6 +57,82 @@ namespace RIMAPI.Helpers
             }
         }
 
+        public static ApiResult<LiveTradePreviewDto> GetPreview(int mapId, string traderId, int minimumSilverReserve, int maximumSpend)
+        {
+            bool opened = false;
+            try
+            {
+                Map map = MapHelper.GetMapByID(mapId);
+                if (map == null) return ApiResult<LiveTradePreviewDto>.Fail($"Map {mapId} not found.");
+                if (TradeSession.Active)
+                    return ApiResult<LiveTradePreviewDto>.Fail("A manual trade session is already open.");
+                Pawn negotiator = BestNegotiator(map);
+                ITrader trader = ResolveTrader(map, traderId);
+                if (negotiator == null || trader == null || !trader.CanTradeNow)
+                    return ApiResult<LiveTradePreviewDto>.Fail("No available trader or negotiator.");
+                if (trader is TradeShip && !map.listerBuildings.allBuildingsColonist.Any(b =>
+                    b.def?.defName == "CommsConsole" && (b.TryGetComp<CompPowerTrader>()?.PowerOn ?? true)))
+                    return ApiResult<LiveTradePreviewDto>.Fail("A powered comms console is required.");
+                if (trader is TradeShip && !map.listerBuildings.allBuildingsColonist.Any(b =>
+                    b.def?.defName == "OrbitalTradeBeacon" && (b.TryGetComp<CompPowerTrader>()?.PowerOn ?? true)))
+                    return ApiResult<LiveTradePreviewDto>.Fail("A powered trade beacon is required.");
+                TradeSession.SetupWith(trader, negotiator, false);
+                opened = true;
+                TradeDeal deal = TradeSession.deal;
+                Tradeable currency = deal.CurrencyTradeable;
+                int colonySilver = currency?.CountHeldBy(Transactor.Colony) ?? 0;
+                int traderSilver = currency?.CountHeldBy(Transactor.Trader) ?? 0;
+                int reserve = Math.Max(0, minimumSilverReserve);
+                int spendLimit = Math.Max(0, maximumSpend);
+                var preview = new LiveTradePreviewDto
+                {
+                    TraderId = traderId, ColonySilver = colonySilver, TraderSilver = traderSilver,
+                    MinimumSilverReserve = reserve, MaximumSpend = spendLimit,
+                };
+                foreach (string category in SaleCategories)
+                {
+                    Tradeable row = deal.AllTradeables.FirstOrDefault(t => t.TraderWillTrade
+                        && SafeSaleCount(t, map, new HashSet<string> { category }) > 0
+                        && t.GetPriceFor(TradeAction.PlayerSells) > 0f);
+                    if (row == null) continue;
+                    float price = row.GetPriceFor(TradeAction.PlayerSells);
+                    int units = Math.Min(SafeSaleCount(row, map, new HashSet<string> { category }),
+                        (int)Math.Floor(traderSilver / price));
+                    if (units > 0) preview.SaleOptions.Add(new LiveTradeCategoryDto
+                    {
+                        Category = category, Example = row.Label, MaximumUnits = units, UnitPrice = price,
+                    });
+                }
+                int availableSilver = Math.Min(spendLimit, Math.Max(0, colonySilver - reserve));
+                foreach (string priority in PurchasePriorities)
+                {
+                    Tradeable row = deal.AllTradeables.Where(t => t.TraderWillTrade
+                        && t.CountHeldBy(Transactor.Trader) > 0 && MatchesPriority(t, priority)
+                        && CanKeepPurchasedAnimal(t, map)
+                        && t.GetPriceFor(TradeAction.PlayerBuys) > 0f)
+                        .OrderBy(t => t.GetPriceFor(TradeAction.PlayerBuys)).FirstOrDefault();
+                    if (row == null) continue;
+                    float price = row.GetPriceFor(TradeAction.PlayerBuys);
+                    int units = Math.Min(row.CountHeldBy(Transactor.Trader),
+                        Math.Min(PurchaseTarget(priority, row), (int)Math.Floor(availableSilver / price)));
+                    if (units > 0) preview.PurchaseOptions.Add(new LiveTradeCategoryDto
+                    {
+                        Category = priority, Example = row.Label, MaximumUnits = units, UnitPrice = price,
+                    });
+                }
+                return ApiResult<LiveTradePreviewDto>.Ok(preview);
+            }
+            catch (Exception ex)
+            {
+                LogApi.Error($"Live trade preview failed: {ex}");
+                return ApiResult<LiveTradePreviewDto>.Fail(ex.Message);
+            }
+            finally
+            {
+                if (opened && TradeSession.Active) TradeSession.Close();
+            }
+        }
+
         public static ApiResult<LiveTradeResponseDto> Execute(LiveTradeRequestDto request)
         {
             try
@@ -87,14 +168,18 @@ namespace RIMAPI.Helpers
                 };
 
                 var saleCategories = new HashSet<string>((request.SaleCategories ?? new List<string>()).Select(s => s.ToLowerInvariant()));
+                float traderSilverRemaining = deal.CurrencyTradeable?.CountHeldBy(Transactor.Trader) ?? 0;
                 foreach (Tradeable row in deal.AllTradeables.Where(t => t.TraderWillTrade && t.CountHeldBy(Transactor.Colony) > 0))
                 {
                     int surplus = SafeSaleCount(row, map, saleCategories);
+                    float price = row.GetPriceFor(TradeAction.PlayerSells);
+                    if (price <= 0f) continue;
+                    surplus = Math.Min(surplus, (int)Math.Floor(traderSilverRemaining / price));
                     if (surplus <= 0) continue;
                     row.ForceToDestination(surplus);
                     response.SoldUnits += surplus;
-                    float price = row.GetPriceFor(TradeAction.PlayerSells);
                     response.ApproximateSaleValue += price * surplus;
+                    traderSilverRemaining -= price * surplus;
                     response.Sold.Add($"{row.Label} x{surplus}");
                 }
                 deal.UpdateCurrencyCount();
@@ -111,13 +196,17 @@ namespace RIMAPI.Helpers
                 foreach (string priority in request.PurchasePriorities ?? new List<string>())
                 {
                     foreach (Tradeable row in deal.AllTradeables
-                        .Where(t => t.TraderWillTrade && t.CountHeldBy(Transactor.Trader) > 0 && MatchesPriority(t, priority))
+                        .Where(t => t.TraderWillTrade && t.CountHeldBy(Transactor.Trader) > 0
+                            && MatchesPriority(t, priority) && CanKeepPurchasedAnimal(t, map))
                         .OrderBy(t => t.GetPriceFor(TradeAction.PlayerBuys)))
                     {
                         float unitPrice = Math.Max(0.01f, row.GetPriceFor(TradeAction.PlayerBuys));
-                        int affordable = Math.Max(0, (int)Math.Floor((request.MaximumSpend - spend) / unitPrice));
+                        int affordableByBudget = Math.Max(0, (int)Math.Floor((request.MaximumSpend - spend) / unitPrice));
+                        int affordableBySilver = Math.Max(0, (int)Math.Floor(
+                            ((deal.CurrencyTradeable?.CountPostDealFor(Transactor.Colony) ?? 0)
+                             - request.MinimumSilverReserve) / unitPrice));
                         int wanted = Math.Min(row.CountHeldBy(Transactor.Trader), PurchaseTarget(priority, row));
-                        int count = Math.Min(affordable, wanted);
+                        int count = Math.Min(Math.Min(affordableByBudget, affordableBySilver), wanted);
                         if (count <= 0) continue;
                         row.ForceToSource(count);
                         deal.UpdateCurrencyCount();
@@ -240,7 +329,8 @@ namespace RIMAPI.Helpers
             if (!selected) return 0;
             int total = row.CountHeldBy(Transactor.Colony);
             int reserve = 0;
-            if (text.Contains("food") || text.Contains("meal") || text.Contains("meat")) reserve = Math.Max(20, map.mapPawns.FreeColonistsSpawnedCount * 18);
+            if (new[] { "food", "meal", "meat", "rice", "corn", "potato", "pemmican", "berry" }.Any(text.Contains))
+                reserve = Math.Max(20, map.mapPawns.FreeColonistsSpawnedCount * 18);
             else if (text.Contains("medicine")) reserve = 12;
             else if (text.Contains("component")) reserve = text.Contains("advanced") ? 4 : 12;
             else if (text.Contains("steel")) reserve = 350;
@@ -260,10 +350,21 @@ namespace RIMAPI.Helpers
             if (wanted == "medicine") return text.Contains("medicine") || text.Contains("neutroamine");
             if (wanted == "slaves") return row.ThingDef.race?.Humanlike == true;
             if (wanted == "livestock") return row.ThingDef.race?.Animal == true;
-            if (wanted == "food") return text.Contains("food") || text.Contains("meal");
+            if (wanted == "food") return new[] { "food", "meal", "rice", "corn", "potato", "pemmican", "berry" }.Any(text.Contains);
             if (wanted == "weapons") return row.ThingDef.IsWeapon;
             if (wanted == "armor") return text.Contains("armor") || text.Contains("helmet") || text.Contains("vest");
             return text.Contains(wanted);
+        }
+
+        private static bool CanKeepPurchasedAnimal(Tradeable row, Map map)
+        {
+            if (row.ThingDef?.race?.Animal != true || !row.ThingDef.race.Roamer) return true;
+            return map.listerBuildings.allBuildingsAnimalPenMarkers.Any(marker =>
+            {
+                CompAnimalPenMarker pen = marker.TryGetComp<CompAnimalPenMarker>();
+                return pen?.PenState?.Enclosed == true && pen.PenState.HasOutsideAccess
+                    && pen.AnimalFilter.Allows(row.ThingDef);
+            });
         }
 
         private static int PurchaseTarget(string priority, Tradeable row)

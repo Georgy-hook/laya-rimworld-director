@@ -309,17 +309,17 @@ namespace RIMAPI.Helpers
                         continue;
 
                     var priority = pawn.workSettings.GetPriority(workType);
-                    if (priority > 0)
-                    {
-                        priorities.Add(
-                            new WorkPriorityDto
-                            {
-                                WorkType = workType.defName,
-                                Priority = priority,
-                                IsTotallyDisabled = pawn.WorkTypeIsDisabled(workType),
-                            }
-                        );
-                    }
+                    // A zero priority is a valid, re-enableable work choice.
+                    // Omitting it makes an idle capable pawn look incapable to
+                    // the director and prevents Laya from assigning that job.
+                    priorities.Add(
+                        new WorkPriorityDto
+                        {
+                            WorkType = workType.defName,
+                            Priority = priority,
+                            IsTotallyDisabled = pawn.WorkTypeIsDisabled(workType),
+                        }
+                    );
                 }
 
                 return priorities.OrderBy(p => p.Priority).ToList();

@@ -33,6 +33,11 @@ namespace RIMAPI.Services
                 var prisoners = map.mapPawns.PrisonersOfColony
                     .Where(p => p != null && !p.Dead)
                     .ToList();
+                var neutralDowned = map.mapPawns.AllPawnsSpawned
+                    .Where(p => p != null && !p.Dead && p.Downed && p.RaceProps?.Humanlike == true
+                        && !p.IsColonist && !p.IsPrisonerOfColony
+                        && !p.HostileTo(Faction.OfPlayer))
+                    .ToList();
                 var weapons = map.listerThings.AllThings
                     .Where(t => t != null && t.Spawned && !t.Destroyed && t.def != null
                         && t.def.IsWeapon && t.def.weaponTags != null && t.def.weaponTags.Count > 0)
@@ -75,6 +80,7 @@ namespace RIMAPI.Services
                     Colonists = colonists.Select(p => ToCombatPawn(p, false, hostiles)).ToList(),
                     Hostiles = hostiles.Select(p => ToCombatPawn(p, true, colonists)).ToList(),
                     Prisoners = prisoners.Select(p => ToCombatPawn(p, false, colonists)).ToList(),
+                    NeutralDowned = neutralDowned.Select(p => ToCombatPawn(p, false, colonists)).ToList(),
                     AvailableWeapons = weapons,
                     Defenses = defenses,
                 };
@@ -161,6 +167,12 @@ namespace RIMAPI.Services
                 MarketValue = pawn.MarketValue,
                 CombatPower = pawn.kindDef?.combatPower ?? 0f,
                 WeaponRange = primary?.def?.Verbs?.FirstOrDefault()?.range ?? 0f,
+                ShootableOpponentIds = primary?.def?.IsRangedWeapon == true
+                    ? (opponents ?? new List<Pawn>())
+                        .Where(other => !other.Dead && !other.Downed
+                            && primary.TryGetComp<CompEquippable>()?.PrimaryVerb?.CanHitTargetFrom(pawn.Position, other) == true)
+                        .Select(other => other.thingIDNumber).ToList()
+                    : new List<int>(),
                 ArmorSharp = pawn.GetStatValue(StatDefOf.ArmorRating_Sharp),
                 CarryingPawnId = pawn.carryTracker?.CarriedThing is Pawn carried ? (int?)carried.thingIDNumber : null,
                 Psyfocus = entropy?.CurrentPsyfocus ?? 0f,

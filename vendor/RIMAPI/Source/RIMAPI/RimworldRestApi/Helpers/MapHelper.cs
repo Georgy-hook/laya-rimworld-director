@@ -245,6 +245,8 @@ namespace RIMAPI.Helpers
                         ManhunterOnTameFailChance = p.RaceProps?.manhunterOnTameFailChance ?? 0f,
                         Reproductive = p.ageTracker?.CurLifeStage?.reproductive ?? false,
                         CanBeDesignatedForTaming = p.Faction != Faction.OfPlayer && !p.Dead && p.GetStatValue(StatDefOf.Wildness) < 1f,
+                        RequiresPen = p.RaceProps?.Roamer == true,
+                        HasSuitableEnclosedPen = p.RaceProps?.Roamer == true && p.Spawned && AnimalPenUtility.AnySuitablePens(p, false),
                         MarketValue = p.MarketValue,
                         MeatAmount = Mathf.RoundToInt(p.GetStatValue(StatDefOf.MeatAmount)),
                         LeatherAmount = Mathf.RoundToInt(p.GetStatValue(StatDefOf.LeatherAmount)),

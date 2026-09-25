@@ -9,6 +9,7 @@ namespace RIMAPI.Models
         public List<CombatPawnDto> Colonists { get; set; } = new List<CombatPawnDto>();
         public List<CombatPawnDto> Hostiles { get; set; } = new List<CombatPawnDto>();
         public List<CombatPawnDto> Prisoners { get; set; } = new List<CombatPawnDto>();
+        public List<CombatPawnDto> NeutralDowned { get; set; } = new List<CombatPawnDto>();
         public List<CombatWeaponDto> AvailableWeapons { get; set; } = new List<CombatWeaponDto>();
         public List<CombatDefenseDto> Defenses { get; set; } = new List<CombatDefenseDto>();
     }
@@ -50,6 +51,7 @@ namespace RIMAPI.Models
         public float MarketValue { get; set; }
         public float CombatPower { get; set; }
         public float WeaponRange { get; set; }
+        public List<int> ShootableOpponentIds { get; set; } = new List<int>();
         public float ArmorSharp { get; set; }
         public int? CarryingPawnId { get; set; }
         public float Psyfocus { get; set; }

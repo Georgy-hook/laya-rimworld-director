@@ -263,25 +263,77 @@ namespace RIMAPI.Helpers
                     {
                         if (IsRanged(pawn))
                         {
-                            if (pawn.CurJob?.def == JobDefOf.AttackStatic && pawn.CurJob.targetA.Thing == target)
+                            if (CanShootTarget(pawn, pawn.Position, target))
                             {
-                                result.AttackingPawnIds.Add(pawn.thingIDNumber);
+                                if (pawn.CurJob?.def == JobDefOf.AttackStatic && pawn.CurJob.targetA.Thing == target)
+                                {
+                                    result.AttackingPawnIds.Add(pawn.thingIDNumber);
+                                    continue;
+                                }
+                                Job shot = JobMaker.MakeJob(JobDefOf.AttackStatic, target);
+                                shot.playerForced = true;
+                                if (pawn.jobs.TryTakeOrderedJob(shot))
+                                    result.AttackingPawnIds.Add(pawn.thingIDNumber);
                                 continue;
                             }
-                            Job shot = JobMaker.MakeJob(JobDefOf.AttackStatic, target);
-                            shot.playerForced = true;
-                            if (pawn.jobs.TryTakeOrderedJob(shot))
-                                result.AttackingPawnIds.Add(pawn.thingIDNumber);
+                            // A guard order must not strand armed escorts behind a
+                            // wall while an unarmed colonist screens the threat.
+                            IntVec3 firingCell;
+                            if (TryFindFiringCell(pawn, target, out firingCell)
+                                || TryFindApproachCell(pawn, target, tactic, out firingCell))
+                            {
+                                Job move = JobMaker.MakeJob(JobDefOf.Goto, firingCell);
+                                move.playerForced = true;
+                                if (pawn.jobs.TryTakeOrderedJob(move))
+                                    result.PositionedPawnIds.Add(pawn.thingIDNumber);
+                            }
+                            else
+                                result.Notes.Add($"{pawn.LabelShortCap} has no safe firing route around the obstruction.");
                             continue;
                         }
 
                         Pawn nearestShooter = shooters.OrderBy(p => p.Position.DistanceToSquared(pawn.Position)).FirstOrDefault();
+                        bool isolatedUnarmed = nearestShooter != null && pawn.equipment?.Primary == null
+                            && pawn.Position.DistanceToSquared(nearestShooter.Position) > 144;
+                        if (isolatedUnarmed)
+                        {
+                            // "Guard the shooters" cannot mean attacking alone
+                            // while the shooters are on the other side of the map.
+                            // Rejoin them; if already threatened, first move away
+                            // from the hostile on a trap-free route.
+                            Pawn immediateThreat = threats
+                                .OrderBy(p => p.Position.DistanceToSquared(pawn.Position))
+                                .FirstOrDefault();
+                            if (immediateThreat != null
+                                && pawn.Position.DistanceToSquared(immediateThreat.Position) <= 100)
+                            {
+                                float awayX = pawn.Position.x - immediateThreat.Position.x;
+                                float awayZ = pawn.Position.z - immediateThreat.Position.z;
+                                float awayLength = (float)Math.Sqrt(awayX * awayX + awayZ * awayZ);
+                                if (awayLength < 0.1f) awayX = 1f;
+                                IntVec3 away = new IntVec3(
+                                    pawn.Position.x + (int)Math.Round(awayX * 8f / Math.Max(awayLength, 1f)), 0,
+                                    pawn.Position.z + (int)Math.Round(awayZ * 8f / Math.Max(awayLength, 1f)));
+                                IntVec3 safeRetreat;
+                                if (TryFindTrapFreeCell(pawn, away, immediateThreat.Position,
+                                    "withdraw_and_regroup", out safeRetreat, 6f))
+                                {
+                                    Job retreat = JobMaker.MakeJob(JobDefOf.Goto, safeRetreat);
+                                    retreat.playerForced = true;
+                                    if (pawn.jobs.TryTakeOrderedJob(retreat))
+                                        result.PositionedPawnIds.Add(pawn.thingIDNumber);
+                                }
+                                else
+                                    result.Notes.Add($"No safe route for isolated {pawn.LabelShortCap} to regroup.");
+                                continue;
+                            }
+                        }
                         float shooterRadius = tactic == "screen_melee" ? 12f : 5f;
                         float fighterRadius = tactic == "screen_melee" ? 9f : 4f;
                         Pawn intercept = threats
-                            .Where(p => nearestShooter == null
+                            .Where(p => !isolatedUnarmed && (nearestShooter == null
                                 || p.Position.DistanceTo(nearestShooter.Position) <= shooterRadius
-                                || p.Position.DistanceTo(pawn.Position) <= fighterRadius)
+                                || p.Position.DistanceTo(pawn.Position) <= fighterRadius))
                             .OrderBy(p => nearestShooter == null
                                 ? p.Position.DistanceToSquared(pawn.Position)
                                 : p.Position.DistanceToSquared(nearestShooter.Position))
@@ -357,12 +409,26 @@ namespace RIMAPI.Helpers
                             float dx = target.Position.x - pawn.Position.x;
                             float dz = target.Position.z - pawn.Position.z;
                             float distance = (float)Math.Sqrt(dx * dx + dz * dz);
-                            if (distance <= range - 2f)
+                            if (distance <= range - 2f && CanShootTarget(pawn, pawn.Position, target))
                             {
                                 Job shot = JobMaker.MakeJob(JobDefOf.AttackStatic, target);
                                 shot.playerForced = true;
                                 if (pawn.jobs.TryTakeOrderedJob(shot))
                                     result.AttackingPawnIds.Add(pawn.thingIDNumber);
+                                continue;
+                            }
+                            if (distance <= range - 2f)
+                            {
+                                IntVec3 firingCell;
+                                if (TryFindFiringCell(pawn, target, out firingCell))
+                                {
+                                    Job move = JobMaker.MakeJob(JobDefOf.Goto, firingCell);
+                                    move.playerForced = true;
+                                    if (pawn.jobs.TryTakeOrderedJob(move))
+                                        result.PositionedPawnIds.Add(pawn.thingIDNumber);
+                                }
+                                else
+                                    result.Notes.Add($"No clear trap-free firing lane exists for {pawn.LabelShortCap}.");
                                 continue;
                             }
                             float step = Math.Min(8f, Math.Max(0f, distance - (range - 4f)));
@@ -394,22 +460,50 @@ namespace RIMAPI.Helpers
                             // These defensive orders used to walk two cells
                             // backward on every cycle because their desired
                             // position was recomputed from the current cell.
-                            // Hold a real cover position or fire from the
-                            // present line; do not drift away indefinitely.
-                            bool needsCover = defense != null
+                            // Cover outside this shooter's range is not a
+                            // firing line: moving there can abandon an ally
+                            // fighting next to the target.
+                            float range = pawn.equipment?.Primary?.def?.Verbs?.FirstOrDefault()?.range ?? 0f;
+                            if (CanShootTarget(pawn, pawn.Position, target))
+                            {
+                                Job shot = JobMaker.MakeJob(JobDefOf.AttackStatic, target);
+                                shot.playerForced = true;
+                                if (pawn.jobs.TryTakeOrderedJob(shot))
+                                    result.AttackingPawnIds.Add(pawn.thingIDNumber);
+                                continue;
+                            }
+                            IntVec3 firingCell;
+                            if (TryFindFiringCell(pawn, target, out firingCell))
+                            {
+                                Job move = JobMaker.MakeJob(JobDefOf.Goto, firingCell);
+                                move.playerForced = true;
+                                if (pawn.jobs.TryTakeOrderedJob(move))
+                                    result.PositionedPawnIds.Add(pawn.thingIDNumber);
+                                continue;
+                            }
+                            // A covered firing order must not strand a shooter who
+                            // starts outside weapon range (or on the far side of a
+                            // building). Advance in safe, short steps until a real
+                            // firing cell becomes reachable; then the next cycle
+                            // uses the exact line-of-sight check above.
+                            IntVec3 approach;
+                            if (TryFindApproachCell(pawn, target, tactic, out approach))
+                            {
+                                Job move = JobMaker.MakeJob(JobDefOf.Goto, approach);
+                                move.playerForced = true;
+                                if (pawn.jobs.TryTakeOrderedJob(move))
+                                    result.PositionedPawnIds.Add(pawn.thingIDNumber);
+                                continue;
+                            }
+                            bool usableCover = defense != null && IsRanged(pawn)
+                                && defense.Position.DistanceTo(target.Position) <= range - 2f
+                                && CanShootTarget(pawn, defense.Position, target);
+                            bool needsCover = usableCover
                                 && pawn.Position.DistanceToSquared(defense.Position) > 9;
                             if (!needsCover)
                             {
-                                float range = pawn.equipment?.Primary?.def?.Verbs?.FirstOrDefault()?.range ?? 0f;
-                                if (IsRanged(pawn) && pawn.Position.DistanceTo(target.Position) <= range)
-                                {
-                                    Job shot = JobMaker.MakeJob(JobDefOf.AttackStatic, target);
-                                    shot.playerForced = true;
-                                    if (pawn.jobs.TryTakeOrderedJob(shot))
-                                        result.AttackingPawnIds.Add(pawn.thingIDNumber);
-                                }
-                                else
-                                    pawn.jobs.StopAll();
+                                pawn.jobs.StopAll();
+                                result.Notes.Add($"{pawn.LabelShortCap} cannot shoot {target.LabelShortCap} from the current side of cover.");
                                 continue;
                             }
                         }
@@ -488,6 +582,69 @@ namespace RIMAPI.Helpers
             return pawn?.equipment?.Primary?.def?.IsRangedWeapon ?? false;
         }
 
+        private static bool CanShootTarget(Pawn pawn, IntVec3 from, Pawn target)
+        {
+            if (!IsRanged(pawn) || target == null || target.Dead || target.Downed)
+                return false;
+            Verb verb = pawn.equipment.Primary.TryGetComp<CompEquippable>()?.PrimaryVerb;
+            return verb != null && verb.CanHitTargetFrom(from, target);
+        }
+
+        private static bool TryFindFiringCell(Pawn pawn, Pawn target, out IntVec3 result)
+        {
+            Map map = pawn.Map;
+            float range = pawn.equipment?.Primary?.def?.Verbs?.FirstOrDefault()?.range ?? 0f;
+            if (range <= 6f)
+            {
+                result = IntVec3.Invalid;
+                return false;
+            }
+            IEnumerable<IntVec3> candidates = GenRadial.RadialCellsAround(pawn.Position, 24f, true)
+                .Where(cell => cell != pawn.Position && cell.InBounds(map) && cell.Standable(map)
+                    && !cell.Fogged(map) && !cell.ContainsStaticFire(map) && !HasFriendlyTrap(cell, map)
+                    && !cell.GetThingList(map).OfType<Pawn>().Any()
+                    && cell.DistanceTo(target.Position) >= 6f
+                    && cell.DistanceTo(target.Position) <= range - 1f
+                    && CanShootTarget(pawn, cell, target))
+                .OrderBy(cell => cell.DistanceToSquared(pawn.Position));
+            foreach (IntVec3 cell in candidates)
+            {
+                PawnPath path = map.pathFinder.FindPathNow(pawn.Position, cell, pawn, null, PathEndMode.OnCell);
+                bool valid = path.Found && path.NodesReversed.All(node => !HasFriendlyTrap(node, map));
+                path.ReleaseToPool();
+                if (!valid) continue;
+                result = cell;
+                return true;
+            }
+            result = IntVec3.Invalid;
+            return false;
+        }
+
+        private static bool TryFindApproachCell(Pawn pawn, Pawn target, string tactic, out IntVec3 result)
+        {
+            float dx = target.Position.x - pawn.Position.x;
+            float dz = target.Position.z - pawn.Position.z;
+            float distance = (float)Math.Sqrt(dx * dx + dz * dz);
+            if (distance < 7f)
+            {
+                result = IntVec3.Invalid;
+                return false;
+            }
+            float step = Math.Min(12f, Math.Max(3f, distance - 6f));
+            IntVec3 desired = new IntVec3(
+                pawn.Position.x + (int)Math.Round(dx * step / distance), 0,
+                pawn.Position.z + (int)Math.Round(dz * step / distance));
+            IntVec3 candidate;
+            if (TryFindTrapFreeCell(pawn, desired, target.Position, tactic, out candidate, 6f)
+                && candidate.DistanceToSquared(target.Position) + 4 < pawn.Position.DistanceToSquared(target.Position))
+            {
+                result = candidate;
+                return true;
+            }
+            result = IntVec3.Invalid;
+            return false;
+        }
+
         private static Building FindDefense(Map map, int? requestedId, string tactic, IntVec3 target, List<Pawn> fighters)
         {
             IEnumerable<Building> candidates = map.listerBuildings.allBuildingsColonist
@@ -508,6 +665,9 @@ namespace RIMAPI.Helpers
                 .Where(b => preferred.Any(token => (b.def.defName + " " + b.Label).ToLowerInvariant().Contains(token)))
                 .Where(b => fighters.Any(f => f.Position.DistanceToSquared(b.Position) <= 400))
                 .Where(b => b.Position.DistanceToSquared(target) >= 36)
+                .Where(b => tactic != "hold_cover" && tactic != "firing_line" || fighters.Any(f =>
+                    IsRanged(f) && b.Position.DistanceTo(target) <=
+                    (f.equipment?.Primary?.def?.Verbs?.FirstOrDefault()?.range ?? 0f) - 2f))
                 .OrderBy(b => fighters.Min(f => f.Position.DistanceToSquared(b.Position)) + b.Position.DistanceToSquared(target) / 4)
                 .FirstOrDefault();
         }

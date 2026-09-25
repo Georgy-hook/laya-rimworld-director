@@ -16,7 +16,7 @@ from typing import Any
 from urllib.request import Request, urlopen
 
 
-APP_NAME = "RimWorld Autopilot 0.0.4"
+APP_NAME = "RimWorld Autopilot 0.0.5"
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1]
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", BASE_DIR))
 DATA_DIR = (Path(os.environ.get("LOCALAPPDATA", str(BASE_DIR))) / "RimWorld Autopilot") if getattr(sys, "frozen", False) else BASE_DIR
@@ -35,6 +35,20 @@ DEFAULT_CONFIG = {
     "device": "cuda",
     "interval": 10,
 }
+
+
+def active_map_key(maps_response: dict[str, Any]) -> str | None:
+    """Match the director's map-state key for the map currently on screen."""
+    maps = maps_response.get("data") or []
+    if not isinstance(maps, list):
+        return None
+    current = next((row for row in maps if isinstance(row, dict) and row.get("is_current_map")), None)
+    if current is None:
+        current = next((row for row in maps if isinstance(row, dict) and row.get("is_player_home")), None)
+    if current is None:
+        return None
+    return ":".join(str(current[field]) if current.get(field) is not None else "unknown"
+                    for field in ("seed", "tile_id", "id"))
 
 
 def load_config() -> dict[str, Any]:
@@ -122,17 +136,26 @@ def read_director_health(pid_path: Path, status_path: Path, stale_after: float =
     }
 
 
-def tail_jsonl(path: Path, limit: int = 500) -> list[dict[str, Any]]:
+def tail_jsonl(path: Path, limit: int = 80, max_bytes: int | None = 8_000_000) -> list[dict[str, Any]]:
     try:
         with path.open("rb") as handle:
             handle.seek(0, os.SEEK_END)
             size = handle.tell()
-            data = b""
-            while size > 0 and data.count(b"\n") <= limit:
-                take = min(65536, size)
+            chunks: list[bytes] = []
+            lines = 0
+            loaded = 0
+            while size > 0 and lines <= limit and (max_bytes is None or loaded < max_bytes):
+                take = min(65536, size, max_bytes - loaded if max_bytes is not None else size)
                 size -= take
                 handle.seek(size)
-                data = handle.read(take) + data
+                chunk = handle.read(take)
+                chunks.append(chunk)
+                lines += chunk.count(b"\n")
+                loaded += take
+            data = b"".join(reversed(chunks))
+            if size > 0:
+                # The capped read can start mid-record. Ignore that fragment.
+                data = data.partition(b"\n")[2]
         rows = []
         for line in data.splitlines()[-limit:]:
             try:
@@ -242,7 +265,7 @@ def export_history(log_path: Path, destination: Path) -> None:
     if destination.suffix.lower() == ".jsonl":
         shutil.copy2(log_path, destination)
         return
-    records = tail_jsonl(log_path, limit=100000)
+    records = tail_jsonl(log_path, limit=100000, max_bytes=None)
     with destination.open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(["timestamp", "mode", "choice", "confidence", "candidates", "result"])

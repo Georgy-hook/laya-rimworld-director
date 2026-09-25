@@ -41,6 +41,17 @@ namespace RIMAPI.Controllers
             await context.SendJsonResponse(LiveTradeAutomationHelper.GetOpportunities(mapId));
         }
 
+        [Get("/api/v1/trade/preview")]
+        [EndpointMetadata("List sale and purchase categories verified against a live trade session and silver reserves")]
+        public async Task GetTradePreview(HttpListenerContext context)
+        {
+            var mapId = RequestParser.GetMapId(context);
+            var traderId = RequestParser.GetStringParameter(context, "trader_id");
+            var reserve = RequestParser.GetIntParameter(context, "minimum_silver_reserve");
+            var spend = RequestParser.GetIntParameter(context, "maximum_spend");
+            await context.SendJsonResponse(LiveTradeAutomationHelper.GetPreview(mapId, traderId, reserve, spend));
+        }
+
         [Post("/api/v1/trade/execute")]
         [EndpointMetadata("Execute a reserve-aware normal trade with a selected live trader")]
         public async Task ExecuteTrade(HttpListenerContext context)
