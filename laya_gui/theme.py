@@ -179,6 +179,11 @@ class FancyButton(tk.Canvas):
             if self._image:
                 self.create_image(27, height / 2, image=self._image)
                 text_x = 56
+            elif self._icon:
+                self.create_text(27, height / 2, text=self._icon, fill=COLORS["cyan"],
+                                 font=("Segoe UI Symbol", 20), anchor="center")
+                label = self._text
+                text_x = 56
             else:
                 text_x = 18
             self.create_text(text_x, height / 2, text=label, fill=foreground, font=self._font, anchor="w")

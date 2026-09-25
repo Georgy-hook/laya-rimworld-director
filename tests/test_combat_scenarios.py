@@ -39,6 +39,43 @@ def raid(fighters, hostiles, defenses=()):
 
 
 class CombatScenarioTests(unittest.TestCase):
+    def test_compact_context_keeps_all_three_fighters_visible(self):
+        class ShortWindowAgent:
+            cfg = {"max_len": 512, "head_max_len": 192}
+
+            def tok(self, text, add_special_tokens=False):
+                return {"input_ids": [0] * ((len(text) + 1) // 2)}
+
+        snapshot = raid(
+            [fighter(1), fighter(2), fighter(3, ranged=False, weapon=None)],
+            [{"id": 99, "kind_def": "Rhinoceros", "health": 0.7,
+              "distance_to_nearest_opponent": 1}],
+        )
+        context = bridge.combat_model_context(ShortWindowAgent(), snapshot)
+        self.assertEqual(len(context["fighters"]), 3)
+        self.assertIn("unarmed", context["ally_weapons"])
+
+    def test_revolver_vs_yorkshire_terrier_at_melee_range_offers_movement_or_melee(self):
+        shooter = fighter(1, distance=1, health=0.79)
+        shooter["tendable_now"] = True
+        shooter["is_drafted"] = True
+        shooter["current_job"] = "AttackStatic"
+        shooter["current_job_target_id"] = 99
+        snapshot = raid([shooter], [{
+            "id": 99, "kind_def": "YorkshireTerrier", "name": "Yorkshire terrier",
+            "health": 0.48, "position": {"x": 12, "z": 10}, "has_ranged_weapon": False,
+            "current_job": "AttackMelee",
+        }])
+        criteria = bridge.make_questions(snapshot)["threat_action"]["criteria"]
+        self.assertIn("backstep_fire", criteria)
+        self.assertIn("engage_melee", criteria)
+        self.assertNotIn("focus_fire", criteria)
+        self.assertNotIn("engage_ranged", criteria)
+        self.assertNotIn("emergency_self_tend", criteria)
+        action = bridge.plan_action(snapshot, {"choice": "backstep_fire"})
+        self.assertEqual(next(row["body"]["tactic"] for row in action["commands"]
+                              if row.get("body", {}).get("tactic")), "backstep_fire")
+
     def test_unsupported_sword_charge_gets_a_real_model_support_choice(self):
         class SupportAgent:
             def __init__(self):
@@ -162,7 +199,7 @@ class CombatScenarioTests(unittest.TestCase):
         options = bridge.make_questions(snapshot)["threat_action"]["criteria"]
         self.assertIn("backstep_fire", options)
         self.assertIn("screen_melee", options)
-        self.assertIn("adjacent insect", options["focus_fire"])
+        self.assertIn("nearby melee enemy", options["focus_fire"])
         backstep = bridge.plan_action(snapshot, {"choice": "backstep_fire", "selected_fighter_ids": [1, 2]})
         tactic = next(row["body"] for row in backstep["commands"] if row.get("body", {}).get("tactic") == "backstep_fire")
         self.assertEqual(tactic["tactic"], "backstep_fire")

@@ -25,6 +25,9 @@ PACKAGED_CONFIG_PATH = BASE_DIR / "rimworld-autopilot.json"
 LEGACY_CONFIG_PATH = BASE_DIR / "laya-control.json"
 PREFERENCES_PATH = DATA_DIR / "autopilot-preferences.json"
 FEEDBACK_PATH = DATA_DIR / "laya-feedback.jsonl"
+OBSERVER_STATUS_PATH = DATA_DIR / "logs" / "observer-status.json"
+OBSERVER_PID_PATH = DATA_DIR / "logs" / "observer.pid"
+OBSERVER_LOG_PATH = DATA_DIR / "logs" / "observer.jsonl"
 DEFAULT_CONFIG = {
     "python_exe": str(BASE_DIR / ".venv" / "Scripts" / "python.exe"),
     "director_script": str(BASE_DIR / "colony_director.py"),
@@ -200,6 +203,38 @@ def stop_director(pid_path: Path, runtime_status_path: Path | None = None) -> in
     if runtime_status_path is not None:
         runtime_status_path.unlink(missing_ok=True)
     return pid
+
+
+def start_observer(config: dict[str, Any], pid_path: Path = OBSERVER_PID_PATH,
+                   status_path: Path = OBSERVER_STATUS_PATH, log_path: Path = OBSERVER_LOG_PATH) -> int:
+    """Start the light camera process independently from the Laya model."""
+    python_exe = Path(str(config["python_exe"]))
+    script = Path(str(config.get("observer_script") or BASE_DIR / "stream_observer.py"))
+    if not python_exe.exists() or not script.exists():
+        raise FileNotFoundError(f"{python_exe}\n{script}")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    status_path.unlink(missing_ok=True)
+    pid_path.unlink(missing_ok=True)
+    stdout = (log_path.parent / "observer.stdout.log").open("ab")
+    stderr = (log_path.parent / "observer.stderr.log").open("ab")
+    try:
+        process = subprocess.Popen([
+            str(python_exe), "-u", str(script), "--api-url", str(config.get("api_url", "http://localhost:8765")),
+            "--pid-file", str(pid_path), "--status", str(status_path), "--log", str(log_path),
+        ], cwd=BASE_DIR, stdout=stdout, stderr=stderr,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            try:
+                return int(pid_path.read_text(encoding="ascii").strip())
+            except (OSError, ValueError):
+                if process.poll() is not None:
+                    raise RuntimeError("Observer exited during startup; see observer.stderr.log")
+                time.sleep(0.05)
+        return process.pid
+    finally:
+        stdout.close()
+        stderr.close()
 
 
 def export_history(log_path: Path, destination: Path) -> None:

@@ -1,7 +1,9 @@
 import tempfile
 import json
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import laya_preferences
 import colony_combat
@@ -53,6 +55,28 @@ class PreferenceTests(unittest.TestCase):
         self.assertFalse(changed["overlay"]["enabled"])
         self.assertFalse(changed["overlay"]["compact"])
         self.assertEqual(changed["overlay"]["max_options"], 8)
+
+    def test_stream_observer_is_opt_in_and_round_trips(self):
+        self.assertFalse(laya_preferences.load_preferences_from_value({})["observer"]["enabled"])
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "preferences.json"
+            laya_preferences.save_preferences({"observer": {"enabled": True}}, path)
+            self.assertTrue(laya_preferences.load_preferences(path)["observer"]["enabled"])
+
+    def test_death_memorial_temporarily_owns_game_overlay(self):
+        with tempfile.TemporaryDirectory() as folder:
+            prefs = Path(folder) / "autopilot-preferences.json"
+            status = Path(folder) / "logs" / "observer-status.json"
+            status.parent.mkdir()
+            status.write_text(json.dumps({"state": "running", "death_overlay_until": time.time() + 20}), encoding="utf-8")
+            client = mock.Mock()
+            client.get.return_value = {}
+            with mock.patch.object(laya_preferences, "preferences_path", return_value=prefs):
+                colony_director.show_overlay(client, compact_lines=["Laya"], full_lines=["Laya"])
+                client.post.assert_not_called()
+                status.write_text(json.dumps({"state": "running", "death_overlay_until": time.time() - 1}), encoding="utf-8")
+                colony_director.show_overlay(client, compact_lines=["Laya"], full_lines=["Laya"])
+                client.post.assert_called_once()
 
     def test_autopilot_preferences_use_product_name(self):
         with tempfile.TemporaryDirectory() as folder:

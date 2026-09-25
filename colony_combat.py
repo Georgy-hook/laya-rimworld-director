@@ -241,9 +241,10 @@ def available_tactics(snapshot: dict[str, Any]) -> dict[str, str]:
         hostile_is_preparing(row) for row in hostiles
     )
 
-    in_range = [row for row in ranged if float(row.get("distance_to_nearest_opponent") or 9999)
+    in_range = [row for row in ranged if 2 < float(row.get("distance_to_nearest_opponent") or 9999)
                 <= float(row.get("weapon_range") or 0) + 1]
-    names: list[str] = ["hold_cover"] if ranged else []
+    contact = [row for row in ranged if float(row.get("distance_to_nearest_opponent") or 9999) <= 2]
+    names: list[str] = ["hold_cover"] if ranged and len(contact) < len(ranged) else []
     if armed_melee:
         names += ["melee_assault", "melee_hold_line"]
         if len(armed_melee) >= 2:
@@ -296,7 +297,7 @@ def available_tactics(snapshot: dict[str, Any]) -> dict[str, str]:
             for lure in ranged
         ):
             names.append("kite")
-    if ranged and all(not row.get("has_ranged_weapon") for row in hostiles) and (has_insects or any("animal" in text or "manhunter" in text for text in hostile_text)):
+    if ranged and all(not row.get("has_ranged_weapon") for row in hostiles):
         if any(float(row.get("distance_to_nearest_opponent") or 9999) <= 12
                and float(row.get("moving", 1)) >= 0.7 for row in ranged):
             names.append("backstep_fire")
@@ -344,10 +345,10 @@ def available_tactics(snapshot: dict[str, Any]) -> dict[str, str]:
                                 "other selected shooters will advance in short trap-free steps, which exposes them.")
             if name == "focus_fire" and len(in_range) < len(hostiles):
                 description += " Risk: fewer shooters are in range than active enemies; other fighters may be left exposed."
-            if name in {"focus_fire", "hold_cover", "firing_line"} and has_insects and any(
+            if name in {"focus_fire", "hold_cover", "firing_line"} and any(
                 float(row.get("distance_to_nearest_opponent") or 9999) <= 6 for row in ranged
             ):
-                description += " Risk: an adjacent insect may prevent a shooter from firing; a short retreat or melee screen may be better."
+                description += " Risk: a nearby melee enemy may prevent a shooter from firing; a short retreat or melee screen may be better."
             result[name] = description
     return result
 

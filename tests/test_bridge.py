@@ -41,7 +41,7 @@ class RosterAgent:
         answers = {}
         for question_id, question in questions.items():
             if question_id == "threat_action":
-                choice = "engage_ranged"
+                choice = "focus_fire"
             elif question_id == "combat_team":
                 choice = next(key for key in question["criteria"] if key == "team_11")
             else:
@@ -240,6 +240,7 @@ class BridgeTests(unittest.TestCase):
                     "is_dead": False,
                     "is_downed": False,
                     "has_ranged_weapon": True,
+                    "weapon_range": 20,
                     "shooting_skill": 12,
                     "melee_skill": 3,
                     "distance_to_nearest_opponent": 8,
@@ -250,10 +251,11 @@ class BridgeTests(unittest.TestCase):
                 {"id": 99, "name": "Raider", "health": 1.0, "is_dead": False, "is_downed": False, "position": {"x": 18, "z": 10}}
             ],
         }
-        decision = bridge.decide(FakeAgent(choice="engage_ranged"), snapshot, 0.0)
+        decision = bridge.decide(FakeAgent(choice="focus_fire"), snapshot, 0.0)
         action = bridge.plan_action(snapshot, decision)
-        self.assertEqual(action["commands"][1]["body"]["job_def"], "AttackStatic")
-        self.assertEqual(action["commands"][1]["body"]["target_thing_id"], 99)
+        tactic = next(command["body"] for command in action["commands"] if command["endpoint"] == "/api/v1/combat/tactic")
+        self.assertEqual(tactic["fighter_ids"], [10])
+        self.assertEqual(tactic["target_pawn_id"], 99)
 
     def test_paused_threat_resumes_after_combat_order(self):
         snapshot = self.snapshot()
@@ -312,9 +314,11 @@ class BridgeTests(unittest.TestCase):
             "colonists": [
                 {"id": 10, "name": "Ada", "health": 1.0, "is_dead": False, "is_downed": False,
                  "has_ranged_weapon": True, "shooting_skill": 12, "melee_skill": 3,
+                 "weapon_range": 20,
                  "distance_to_nearest_opponent": 8, "position": {"x": 10, "z": 10}},
                 {"id": 11, "name": "Bo", "health": 0.9, "is_dead": False, "is_downed": False,
                  "has_ranged_weapon": True, "shooting_skill": 8, "melee_skill": 5,
+                 "weapon_range": 20,
                  "distance_to_nearest_opponent": 9, "position": {"x": 9, "z": 10}},
             ],
             "hostiles": [{"id": 99, "name": "Squirrel", "health": 1.0, "is_dead": False,
@@ -339,6 +343,7 @@ class BridgeTests(unittest.TestCase):
                  "distance_to_nearest_opponent": 8, "position": {"x": 10, "z": 10}},
                 {"id": 11, "name": "Bo", "health": 1.0, "is_dead": False, "is_downed": False,
                  "has_ranged_weapon": True, "shooting_skill": 8, "melee_skill": 5,
+                 "weapon_range": 20,
                  "manipulation": 1.0, "moving": 1.0, "sight": 1.0, "pain": 0.0,
                  "health_conditions": [], "traits": ["Tough"],
                  "distance_to_nearest_opponent": 9, "position": {"x": 9, "z": 10}},
@@ -352,8 +357,8 @@ class BridgeTests(unittest.TestCase):
         self.assertIsNone(decision["selected_fighter_ids"])
         self.assertEqual(len(agent.calls), 1)
         action = bridge.plan_action(snapshot, decision)
-        attacks = [c for c in action["commands"] if c.get("body", {}).get("job_def") == "AttackStatic"]
-        self.assertEqual({c["body"]["pawn_id"] for c in attacks}, {10, 11})
+        attacks = [c for c in action["commands"] if c.get("body", {}).get("tactic") == "focus_fire"]
+        self.assertEqual(attacks[0]["body"]["fighter_ids"], [11])
 
     def test_remote_api_is_rejected(self):
         with self.assertRaises(ValueError):

@@ -20,8 +20,9 @@ import laya_preferences
 
 from .i18n import PRIORITY_TEXT, QUESTION_TEXT, doctrine_view, humanize, risk_text, tr
 from .services import (
-    APP_NAME, BASE_DIR, DATA_DIR, FEEDBACK_PATH, PREFERENCES_PATH, RESOURCE_DIR, append_feedback, export_bundle, export_history,
-    load_config, read_director_health, read_pid, request_json, start_director, stop_director, tail_jsonl,
+    APP_NAME, BASE_DIR, DATA_DIR, FEEDBACK_PATH, OBSERVER_PID_PATH, OBSERVER_STATUS_PATH, PREFERENCES_PATH, RESOURCE_DIR,
+    append_feedback, export_bundle, export_history, load_config, read_director_health, read_pid, request_json,
+    start_director, start_observer as launch_observer, stop_director, tail_jsonl,
     timestamped_export_name,
 )
 from .theme import (
@@ -59,6 +60,8 @@ class ControlCenter(tk.Tk):
         self._build_ui()
         self.after(150, self.refresh_all)
         self.after(16, self._animate_mascot)
+        if self.preferences.get("observer", {}).get("enabled") and os.environ.get("LAYA_GUI_SMOKE_TEST") != "1":
+            self.after(300, self._auto_start_observer)
 
     def _build_ui(self) -> None:
         self._hero_resize_job = None
@@ -88,6 +91,7 @@ class ControlCenter(tk.Tk):
         self._build_strategy_page()
         self._build_priorities_page()
         self._build_history_page()
+        self._build_stream_page()
         self._build_settings_page()
         self.footer = tk.Label(self.main, text=tr(self.language, "ready"), bg=COLORS["sidebar"], fg=COLORS["muted"], anchor="w", padx=20, pady=8, font=FONTS["small"])
         self.footer.pack(fill="x", side="bottom")
@@ -142,11 +146,11 @@ class ControlCenter(tk.Tk):
         tk.Label(self.sidebar, text="RIMWORLD", bg=COLORS["sidebar"], fg=COLORS["text"], font=("Segoe UI Black", 15)).pack()
         tk.Label(self.sidebar, text="AUTOPILOT", bg=COLORS["sidebar"], fg=COLORS["cyan"], font=("Segoe UI Semibold", 9)).pack(pady=(0, 18))
 
-        for page in ("overview", "strategy", "priorities", "history", "settings"):
-            icon = self._load_ui_image(f"nav-{page}", f"nav-{page}.png", (34, 34))
+        for page in ("overview", "strategy", "priorities", "history", "stream", "settings"):
+            icon = None if page == "stream" else self._load_ui_image(f"nav-{page}", f"nav-{page}.png", (34, 34))
             button = FancyButton(
                 self.sidebar, text=tr(self.language, page), width=208, height=52, variant="ghost", align="left",
-                image=icon,
+                image=icon, icon="◉" if page == "stream" else "",
                 command=lambda name=page: self.switch_page(name),
             )
             button.pack(padx=10, pady=2)
@@ -175,6 +179,8 @@ class ControlCenter(tk.Tk):
         self.game_chip.pack(side="right", padx=5)
         self.laya_chip = tk.Label(header, text=tr(self.language, "laya_offline"), bg=COLORS["panel"], fg=COLORS["red"], padx=12, pady=7, font=("Segoe UI Semibold", 9))
         self.laya_chip.pack(side="right", padx=5)
+        self.observer_chip = tk.Label(header, text=tr(self.language, "observer_offline"), bg=COLORS["panel"], fg=COLORS["muted"], padx=12, pady=7, font=("Segoe UI Semibold", 9))
+        self.observer_chip.pack(side="right", padx=5)
 
     def _new_page(self, name: str, *, scroll: bool = False) -> tk.Frame:
         container = tk.Frame(self.page_host, bg=COLORS["window"])
@@ -318,6 +324,30 @@ class ControlCenter(tk.Tk):
         self.details = tk.Text(history.body, height=9, bg=COLORS["panel_alt"], fg=COLORS["text"], relief="flat", font=FONTS["body"] if not self.tech_var.get() else FONTS["mono"], wrap="word", padx=12, pady=10, cursor="arrow")
         self.details.pack(fill="both", expand=True)
 
+    def _build_stream_page(self) -> None:
+        page = self._new_page("stream")
+        control = ShadowCard(page, padx=26, pady=24)
+        control.pack(fill="x", pady=(0, 14))
+        tk.Label(control.body, text=tr(self.language, "observer_title"), bg=COLORS["panel"], fg=COLORS["cyan"], font=FONTS["title"]).pack(anchor="w")
+        tk.Label(control.body, text=tr(self.language, "observer_help"), bg=COLORS["panel"], fg=COLORS["muted"], font=FONTS["body"],
+                 justify="left", wraplength=880).pack(anchor="w", pady=(8, 16))
+        buttons = tk.Frame(control.body, bg=COLORS["panel"])
+        buttons.pack(anchor="w")
+        FancyButton(buttons, text=tr(self.language, "observer_start"), width=206, variant="accent", command=self.start_stream_observer).pack(side="left", padx=(0, 10))
+        FancyButton(buttons, text=tr(self.language, "observer_stop"), width=206, variant="soft", command=self.stop_stream_observer).pack(side="left")
+        self.observer_status_label = tk.Label(control.body, text=tr(self.language, "observer_offline"), bg=COLORS["panel"],
+                                              fg=COLORS["muted"], font=FONTS["heading"], anchor="w")
+        self.observer_status_label.pack(fill="x", pady=(20, 4))
+        self.observer_focus_label = tk.Label(control.body, text=tr(self.language, "observer_no_focus"), bg=COLORS["panel"],
+                                             fg=COLORS["text"], font=FONTS["body"], anchor="w")
+        self.observer_focus_label.pack(fill="x")
+
+        guide = ShadowCard(page, padx=26, pady=24)
+        guide.pack(fill="x")
+        tk.Label(guide.body, text=tr(self.language, "observer_rules_title"), bg=COLORS["panel"], fg=COLORS["amber"], font=FONTS["heading"]).pack(anchor="w")
+        tk.Label(guide.body, text=tr(self.language, "observer_rules"), bg=COLORS["panel"], fg=COLORS["text"],
+                 font=FONTS["body"], justify="left", wraplength=950).pack(anchor="w", pady=(10, 0))
+
     def _build_settings_page(self) -> None:
         page = self._new_page("settings", scroll=True)
         row = tk.Frame(page, bg=COLORS["window"])
@@ -459,6 +489,39 @@ class ControlCenter(tk.Tk):
         except OSError as exc:
             messagebox.showerror(APP_NAME, f"{tr(self.language, 'error')}: {exc}")
 
+    def _auto_start_observer(self) -> None:
+        health = read_director_health(OBSERVER_PID_PATH, OBSERVER_STATUS_PATH)
+        if health.get("state") in {"running", "starting", "waiting"}:
+            return
+        try:
+            if health.get("pid"):
+                stop_director(OBSERVER_PID_PATH, OBSERVER_STATUS_PATH)
+            launch_observer(self.config_data)
+        except (OSError, RuntimeError, FileNotFoundError) as exc:
+            self.footer.configure(text=f"{tr(self.language, 'observer_error')}: {exc}", fg=COLORS["red"])
+
+    def start_stream_observer(self) -> None:
+        health = read_director_health(OBSERVER_PID_PATH, OBSERVER_STATUS_PATH)
+        try:
+            if health.get("pid") and health.get("state") not in {"running", "starting", "waiting"}:
+                stop_director(OBSERVER_PID_PATH, OBSERVER_STATUS_PATH)
+            if health.get("state") not in {"running", "starting", "waiting"}:
+                launch_observer(self.config_data)
+            self.preferences["observer"] = {"enabled": True}
+            laya_preferences.save_preferences(self.preferences, PREFERENCES_PATH)
+            self.refresh_views()
+        except (OSError, RuntimeError, FileNotFoundError) as exc:
+            messagebox.showerror(APP_NAME, f"{tr(self.language, 'observer_error')}: {exc}")
+
+    def stop_stream_observer(self) -> None:
+        try:
+            stop_director(OBSERVER_PID_PATH, OBSERVER_STATUS_PATH)
+            self.preferences["observer"] = {"enabled": False}
+            laya_preferences.save_preferences(self.preferences, PREFERENCES_PATH)
+            self.refresh_views()
+        except OSError as exc:
+            messagebox.showerror(APP_NAME, f"{tr(self.language, 'observer_error')}: {exc}")
+
     def set_speed(self, speed: int) -> None:
         url = f"{str(self.config_data['api_url']).rstrip('/')}/api/v1/game/speed?speed={speed}"
         try:
@@ -517,7 +580,29 @@ class ControlCenter(tk.Tk):
         color = COLORS["green"] if state == "running" else COLORS["amber"] if state in {"starting", "waiting"} else COLORS["red"]
         status_text = tr(self.language, status_key)
         self.laya_chip.configure(text=status_text, fg=color)
-        self.sidebar_status.configure(text=f"● {status_text}\n● {tr(self.language, 'game_online' if self.game_online else 'game_offline')}")
+        observer_health = read_director_health(OBSERVER_PID_PATH, OBSERVER_STATUS_PATH)
+        observer_state = str(observer_health.get("state") or "stopped")
+        observer_key = {"running": "observer_online", "waiting": "observer_waiting", "starting": "observer_waiting",
+                        "unresponsive": "observer_error", "error": "observer_error"}.get(observer_state, "observer_offline")
+        observer_text = tr(self.language, observer_key)
+        observer_color = COLORS["green"] if observer_state == "running" else COLORS["amber"] if observer_state in {"waiting", "starting"} else COLORS["muted"]
+        self.observer_chip.configure(text=observer_text, fg=observer_color)
+        self.observer_status_label.configure(text=observer_text, fg=observer_color)
+        try:
+            observer_status = json.loads(OBSERVER_STATUS_PATH.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            observer_status = {}
+        shot = str(observer_status.get("shot") or "")
+        target = str(observer_status.get("target") or "")
+        if observer_state == "running" and shot:
+            focus = tr(self.language, "observer_focus").format(
+                kind=tr(self.language, f"observer_shot_{shot}"), target=target or "—",
+                seconds=int(float(observer_status.get("remaining") or 0)),
+            )
+        else:
+            focus = tr(self.language, "observer_no_focus")
+        self.observer_focus_label.configure(text=focus)
+        self.sidebar_status.configure(text=f"● {status_text}\n● {tr(self.language, 'game_online' if self.game_online else 'game_offline')}\n● {observer_text}")
         if state in {"error", "unresponsive"} and health.get("detail"):
             self.footer.configure(text=str(health["detail"])[:180], fg=COLORS["red"])
         map_state = self._load_map_state()

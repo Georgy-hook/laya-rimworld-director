@@ -2,7 +2,7 @@
 
 The 0.0.4 RimWorld Autopilot control center is intentionally separate from the colony controller. `autopilot_control.py` is the public launcher (`laya_control.py` remains compatible); the implementation lives in `laya_gui/`:
 
-- `app.py` composes the five user pages and animated navigation shell;
+- `app.py` composes the six user pages and animated navigation shell;
 - `theme.py` owns semantic dark-theme tokens, typography, shadows, focus-visible buttons, rounded scrollbars, scrollable pages and reusable cards;
 - `i18n.py` owns Russian/English copy and friendly names for internal decisions;
 - `services.py` owns process control, local API checks and export operations;
@@ -15,7 +15,8 @@ The 0.0.4 RimWorld Autopilot control center is intentionally separate from the c
 2. **Strategy** — the selected doctrine and every direction available in the loaded Core/DLC set.
 3. **Priorities** — eight 0–100 preference weights, a free-form personal note and explicit peaceful/safety boundaries.
 4. **History** — friendly explanations by default; exact JSON is available only after enabling technical mode.
-5. **Settings** — Russian/English switch with real flag assets, diagnostic logging, compact/hidden in-game HUD controls, standard Windows uninstall and exports.
+5. **Stream** — starts/stops a separate camera observer and shows its current shot and target. The observer persists after closing the GUI; the enabled preference restores it when the GUI opens again.
+6. **Settings** — Russian/English switch with real flag assets, diagnostic logging, compact/hidden in-game HUD controls, standard Windows uninstall and exports.
 
 The interface uses native Tk widgets and the standard library. It therefore adds no UI framework dependency to the already large local-model installation. Rounded cards, animated buttons and orbit particles are drawn locally. The 1240×800 minimum size protects the decision-boundary controls, while long pages remain vertically scrollable. History and page scrollbars use a compact rounded track with keyboard support instead of legacy arrow controls. Buttons expose keyboard focus and Enter/Space activation.
 
@@ -32,6 +33,8 @@ Normal logging keeps the visible compact model context, compared options, decisi
 On the History page, **Rate decision** records your corrected choice and an optional explanation in a local feedback file. This creates labelled examples for later training; it does not retrain or change the running model. A full diagnostic export includes the feedback file.
 
 The director writes a separate UTC heartbeat with its PID and current state. The GUI reports loading, waiting for a colony, running, decision errors and an unresponsive process independently; an old but still-live PID can no longer masquerade as a healthy autopilot. The HUD preference is read on every publication, so hiding it takes effect without stopping Laya. Compact mode renders a smaller RimWorld panel with up to five thin yellow bars. High-contrast labels and percentages sit above each bar. The widths show relative model weights, not the likelihood of a successful game outcome; these weights have not been calibrated on RimWorld data.
+
+The stream observer uses its own PID, heartbeat and log, and runs without loading the Laya model. It follows pawns, moves and zooms the camera, shows an English death caption, resumes pauses and retries 3× game speed after raid slowdowns. Camera shots remain timed in real seconds. Death captions temporarily take precedence over Laya's in-game overlay. See [Stream Observer](docs/STREAM_OBSERVER.md) for the shot schedule and operational limitations.
 
 All calls into the Laya decision model pass through one guard. Questions with exactly one feasible answer are accepted deterministically and recorded with probability 1.0 without invoking the model; questions with no feasible answer are rejected as planner errors. Laya therefore receives only genuine decisions with at least two alternatives.
 

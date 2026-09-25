@@ -182,7 +182,13 @@ def normalize_colonists(rows: Any) -> list[dict[str, Any]]:
                 "hunger": round(first_number(pawn.get("hunger"), 0.5), 3),
                 "rest": round(first_number(details.get("sleep"), 0.5), 3),
                 "joy": round(first_number(details.get("joy"), 0.5), 3),
-                "bleeding_rate": round(first_number(medical.get("bleeding_rate"), 0.0), 3),
+                "bleeding_rate": round(first_number(medical.get("bleeding_rate"), 0.1 if any(
+                    condition["bleeding"] and condition["tendable_now"] for condition in hediffs
+                ) else 0.0), 3),
+                "tendable_now": any(condition["tendable_now"] for condition in hediffs),
+                "pain": round(first_number(medical.get("pain")), 3),
+                "comfort": round(first_number(details.get("comfort"), 0.5), 3),
+                "beauty": round(first_number(details.get("beauty"), 0.5), 3),
                 "downed": bool(medical.get("is_downed")),
                 "current_job": str(work.get("current_job") or work.get("job") or "unknown"),
                 "inspiration": str(work.get("inspiration_def_name") or ""),
@@ -252,6 +258,17 @@ def safe_get(client: RimApiClient, endpoint: str, warnings: list[str], **query: 
         return None
 
 
+def annotate_mental_states(colonists: list[dict[str, Any]], fighters: Any) -> None:
+    """The combat feed exposes a pawn's live mental break; the detailed feed does not."""
+    by_id = {
+        int(row["id"]): bool(row.get("is_in_mental_state"))
+        for row in (fighters if isinstance(fighters, list) else []) if isinstance(row, dict)
+        and row.get("id") is not None
+    }
+    for colonist in colonists:
+        colonist["in_mental_state"] = by_id.get(int(colonist.get("id") or 0), False)
+
+
 def collect_snapshot(client: RimApiClient) -> dict[str, Any]:
     warnings: list[str] = []
     game = client.get("/api/v1/game/state")
@@ -283,6 +300,7 @@ def collect_snapshot(client: RimApiClient) -> dict[str, Any]:
     hostiles = combat.get("hostiles") if isinstance(combat, dict) else []
     fighters = combat.get("colonists") if isinstance(combat, dict) else []
     weapons = combat.get("available_weapons") if isinstance(combat, dict) else []
+    annotate_mental_states(colonists, fighters)
 
     return {
         "captured_at": utc_now(),
@@ -572,7 +590,9 @@ def combat_model_context(agent: Any, snapshot: dict[str, Any], *,
         return len(tokenizer(json.dumps(state, ensure_ascii=False), add_special_tokens=False)["input_ids"]) <= budget
     if fits():
         return state
-    for fighter_limit, enemy_limit in ((8, 5), (5, 3), (3, 2), (1, 1)):
+    # Keep the actual three-person squad visible before dropping less important
+    # descriptive fields. A one-fighter snapshot misrepresents a live battle.
+    for fighter_limit, enemy_limit in ((8, 5), (5, 3), (3, 2)):
         state["fighters"] = [fighter(row) for row in fighters[:fighter_limit]]
         state["hostiles"] = [hostile(row) for row in enemies[:enemy_limit]]
         if fits():
@@ -676,10 +696,12 @@ def make_questions(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
         elif far_assault:
             criteria["prepare_undrafted"] = "Assault is beyond range: eat and rest now, but risk being caught before re-drafting."
             criteria["hold_and_observe"] = "Watch the approach with current orders; drafted fighters cannot eat or sleep."
-        elif (armed_shooters and len(hostile_rows) == 1
-              and any("emp" not in str(pawn.get("weapon_def") or "").lower()
-                      for pawn in armed_shooters)):
-            criteria["engage_ranged"] = "Legacy direct focus-fire order using every selected healthy armed shooter."
+        if any(first_number(pawn.get("distance_to_nearest_opponent"), 9999) <= 2
+               for pawn in fighters):
+            criteria["engage_melee"] = (
+                "Enemy is in contact: use mobile colonists for immediate melee, including gun-bash if a shooter cannot fire. "
+                "This prevents standing still but risks wounds against a stronger melee attacker."
+            )
         if not staging and any(weapon.get("is_ranged") for weapon in snapshot["combat"].get("available_weapons", [])) and any(
             not pawn.get("has_ranged_weapon") and first_number(pawn.get("sight"), 1) >= 0.65
             and first_number(pawn.get("manipulation"), 1) >= 0.65
@@ -689,6 +711,7 @@ def make_questions(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
         if any(
             pawn.get("tendable_now") and not pawn.get("is_downed") and not pawn.get("is_in_mental_state")
             and first_number(pawn.get("moving"), 1) >= 0.65
+            and first_number(pawn.get("distance_to_nearest_opponent"), 9999) > 4
             for pawn in snapshot["combat"].get("colonists", [])
         ):
             criteria["emergency_self_tend"] = (
@@ -855,6 +878,7 @@ def decide(agent: Any, snapshot: dict[str, Any], confidence_threshold: float) ->
         patients = [pawn for pawn in snapshot["combat"].get("colonists", [])
                     if pawn.get("tendable_now") and not pawn.get("is_downed") and not pawn.get("is_in_mental_state")
                     and first_number(pawn.get("moving"), 1) >= 0.65
+                    and first_number(pawn.get("distance_to_nearest_opponent"), 9999) > 4
                     ]
         if len(patients) > 1:
             medical_question = {"medical_target": {
@@ -1130,7 +1154,8 @@ def plan_action(snapshot: dict[str, Any], decision: dict[str, Any]) -> dict[str,
         patient = next((pawn for pawn in snapshot["combat"].get("colonists", [])
                         if pawn.get("id") == patient_id and pawn.get("tendable_now")
                         and not pawn.get("is_downed") and not pawn.get("is_in_mental_state")
-                        and first_number(pawn.get("moving"), 1) >= 0.65), None)
+                        and first_number(pawn.get("moving"), 1) >= 0.65
+                        and first_number(pawn.get("distance_to_nearest_opponent"), 9999) > 4), None)
         if patient is None:
             return {"kind": "noop", "description": "No mobile self-tend patient remains"}
         commands = []

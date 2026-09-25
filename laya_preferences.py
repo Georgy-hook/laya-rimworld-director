@@ -28,6 +28,7 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
         "compact": True,
         "max_options": 5,
     },
+    "observer": {"enabled": False},
     "priorities": DEFAULT_PRIORITIES,
     "personal_note": "",
     "safety": {
@@ -57,6 +58,7 @@ def load_preferences(path: Path | None = None) -> dict[str, Any]:
         "priorities": dict(DEFAULT_PRIORITIES),
         "safety": dict(DEFAULT_PREFERENCES["safety"]),
         "overlay": dict(DEFAULT_PREFERENCES["overlay"]),
+        "observer": dict(DEFAULT_PREFERENCES["observer"]),
     }
     source = path or preferences_path()
     if path is None and not source.exists():
@@ -69,7 +71,7 @@ def load_preferences(path: Path | None = None) -> dict[str, Any]:
         return result
     if not isinstance(loaded, dict):
         return result
-    result.update({key: value for key, value in loaded.items() if key not in {"priorities", "safety", "overlay"}})
+    result.update({key: value for key, value in loaded.items() if key not in {"priorities", "safety", "overlay", "observer"}})
     if isinstance(loaded.get("priorities"), dict):
         for key in DEFAULT_PRIORITIES:
             try:
@@ -87,6 +89,8 @@ def load_preferences(path: Path | None = None) -> dict[str, Any]:
             result["overlay"]["max_options"] = max(3, min(8, int(loaded["overlay"].get("max_options", 5))))
         except (TypeError, ValueError):
             pass
+    if isinstance(loaded.get("observer"), dict):
+        result["observer"]["enabled"] = bool(loaded["observer"].get("enabled", False))
     result["language"] = "en" if result.get("language") == "en" else "ru"
     result["technical_logging"] = bool(result.get("technical_logging"))
     result["personal_note"] = str(result.get("personal_note") or "")[:1200]
@@ -108,9 +112,10 @@ def load_preferences_from_value(data: dict[str, Any]) -> dict[str, Any]:
         "priorities": dict(DEFAULT_PRIORITIES),
         "safety": dict(DEFAULT_PREFERENCES["safety"]),
         "overlay": dict(DEFAULT_PREFERENCES["overlay"]),
+        "observer": dict(DEFAULT_PREFERENCES["observer"]),
     }
     if isinstance(data, dict):
-        result.update({key: value for key, value in data.items() if key not in {"priorities", "safety", "overlay"}})
+        result.update({key: value for key, value in data.items() if key not in {"priorities", "safety", "overlay", "observer"}})
         for key in DEFAULT_PRIORITIES:
             try:
                 result["priorities"][key] = max(0, min(100, int((data.get("priorities") or {}).get(key, result["priorities"][key]))))
@@ -127,6 +132,8 @@ def load_preferences_from_value(data: dict[str, Any]) -> dict[str, Any]:
                 result["overlay"]["max_options"] = max(3, min(8, int(data["overlay"].get("max_options", 5))))
             except (TypeError, ValueError):
                 pass
+        if isinstance(data.get("observer"), dict):
+            result["observer"]["enabled"] = bool(data["observer"].get("enabled", False))
     result["language"] = "en" if result.get("language") == "en" else "ru"
     result["technical_logging"] = bool(result.get("technical_logging"))
     result["personal_note"] = str(result.get("personal_note") or "")[:1200]

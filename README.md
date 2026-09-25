@@ -65,6 +65,7 @@ The yellow bars show how Laya weighs the choices in front of it. The same view i
 - Choose among 30 Core and DLC-aware colony directions, then shape research, building, work, trade, diplomacy, and endgame goals around that course.
 - Reconsider the plan when resources, seasons, new technology, or events change the colony's situation.
 - Bring your own priorities to the desktop app, review Laya's choices, export the history, and switch the in-game overlay on or off. The interface is available in English and Russian.
+- Turn on the optional Stream Observer for an unattended broadcast: the camera follows colonists, fights and fresh raids, pauses on a death with its reported cause, and tours the map between events.
 
 ## Quick install
 
@@ -90,6 +91,8 @@ The bundled RIMAPI mod reads live game state and accepts ordinary game commands 
 That hierarchy keeps decisions focused. If Laya skips hunting, it is not asked to choose prey. If it decides to build, it can choose the room, material, entrance, and generated layout. In battle, it sees the available fighters and opposing force before choosing a tactic and roster. The HUD bars compare the options offered at that moment.
 
 The control center shows the current colony direction, recent decisions, priorities, and connection health. It also offers a technical log view and a way to export decision history. See [Laya architecture and evaluation](docs/LAYA_ARCHITECTURE.md) for the model interface and [architecture](ARCHITECTURE.md) for the full project layout.
+
+For a Twitch broadcast, open **Stream** in the control center and turn on **Observer**. It directs the camera, resumes game pauses and restores 3× speed after raids slow the game; Laya's colony decisions remain separate. Camera shot lengths stay in real seconds. Turn it off before pausing to inspect the game yourself. The [observer guide](docs/STREAM_OBSERVER.md) explains the shot order and standalone script.
 
 ### Data and privacy
 

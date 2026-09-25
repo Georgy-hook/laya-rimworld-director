@@ -554,7 +554,8 @@ def doctrine_research_candidates(doctrine: dict[str, Any], research_tree: list[d
     lowered = tuple(dict.fromkeys(str(token).lower() for token in tokens if token))
     scored: list[tuple[float, str, dict[str, Any]]] = []
     for row in research_tree or []:
-        if not isinstance(row, dict) or row.get("is_finished") or not row.get("can_start_now"):
+        if (not isinstance(row, dict) or row.get("is_finished") or not row.get("can_start_now")
+                or row.get("player_has_any_appropriate_research_bench") is False):
             continue
         name = str(row.get("name") or "")
         if not name:
