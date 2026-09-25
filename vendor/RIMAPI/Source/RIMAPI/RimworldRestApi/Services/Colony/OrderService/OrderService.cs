@@ -86,6 +86,18 @@ public class OrderService : IOrderService
                 }
                 count++;
             }
+            else if (type == "home" || type == "clear-home")
+            {
+                // Firefighting, repairs and cleaning require Home area. Keep
+                // expansion explicit so Laya can protect nearby structures
+                // without turning the entire map into a cleaning job.
+                bool wanted = type == "home";
+                if (map.areaManager.Home[c] != wanted)
+                {
+                    map.areaManager.Home[c] = wanted;
+                    count++;
+                }
+            }
         }
 
         return ApiResult.Ok();

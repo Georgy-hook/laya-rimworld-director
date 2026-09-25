@@ -92,6 +92,8 @@ That hierarchy keeps decisions focused. If Laya skips hunting, it is not asked t
 
 The control center shows the current colony direction, recent decisions, priorities, and connection health. It also offers a technical log view and a way to export decision history. See [Laya architecture and evaluation](docs/LAYA_ARCHITECTURE.md) for the model interface and [architecture](ARCHITECTURE.md) for the full project layout.
 
+The [colony playtest log](PLAYTEST_REPORT.md) records each observed run, including colony lifespan, colonist outcomes, and issues found during testing.
+
 For a Twitch broadcast, open **Stream** in the control center and turn on **Observer**. It directs the camera, resumes game pauses and restores 3× speed after raids slow the game; Laya's colony decisions remain separate. Camera shot lengths stay in real seconds. Turn it off before pausing to inspect the game yourself. The [observer guide](docs/STREAM_OBSERVER.md) explains the shot order and standalone script.
 
 ### Data and privacy

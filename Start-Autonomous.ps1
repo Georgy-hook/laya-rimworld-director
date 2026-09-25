@@ -7,10 +7,18 @@ $primaryConfigPath = Join-Path $PSScriptRoot 'rimworld-autopilot.json'
 $legacyConfigPath = Join-Path $PSScriptRoot 'laya-control.json'
 $configPath = if (Test-Path -LiteralPath $primaryConfigPath) { $primaryConfigPath } else { $legacyConfigPath }
 $config = if (Test-Path -LiteralPath $configPath) { Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json } else { $null }
-$python = if ($config -and $config.python_exe) { [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot $config.python_exe)) } else { Join-Path $PSScriptRoot '.venv\Scripts\python.exe' }
+$python = if ($config -and $config.python_exe) {
+    $configuredPython = [string]$config.python_exe
+    if ([System.IO.Path]::IsPathRooted($configuredPython)) {
+        [System.IO.Path]::GetFullPath($configuredPython)
+    } else {
+        [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot $configuredPython))
+    }
+} else { Join-Path $PSScriptRoot '.venv\Scripts\python.exe' }
 $director = Join-Path $PSScriptRoot 'colony_director.py'
 $dataDir = Join-Path $env:LOCALAPPDATA 'RimWorld Autopilot'
 $env:RIMWORLD_AUTOPILOT_PREFERENCES = Join-Path $dataDir 'autopilot-preferences.json'
+$env:PYTHONIOENCODING = 'utf-8'
 $logDir = Join-Path $dataDir 'logs'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $log = Join-Path $logDir 'decisions.jsonl'

@@ -173,6 +173,7 @@ def start_director(config: dict[str, Any], log_path: Path, state_path: Path, pid
     ]
     environment = os.environ.copy()
     environment["RIMWORLD_AUTOPILOT_PREFERENCES"] = str(PREFERENCES_PATH)
+    environment["PYTHONIOENCODING"] = "utf-8"
     try:
         runtime_status_path.unlink(missing_ok=True)
         pid_path.unlink(missing_ok=True)

@@ -237,14 +237,17 @@ def summarize_resources(things: Any) -> dict[str, int]:
 
 def normalize_resource_summary(summary: Any) -> dict[str, Any]:
     if not isinstance(summary, dict):
-        return {"food": 0, "meals": 0, "raw_food": 0, "nutrition": 0.0, "medicine": 0, "weapons": 0}
+        return {"food": 0, "meals": 0, "raw_food": 0, "nutrition": 0.0,
+                "nutrition_rotting_soon": 0.0, "medicine": 0, "weapons": 0}
     critical = summary.get("critical_resources") or {}
     food = critical.get("food_summary") or {}
+    rot = food.get("rot_status_info") or {}
     return {
         "food": int(first_number(food.get("food_total"))),
         "meals": int(first_number(food.get("meals_count"))),
         "raw_food": int(first_number(food.get("raw_food_count"))),
         "nutrition": round(first_number(food.get("total_nutrition")), 2),
+        "nutrition_rotting_soon": round(first_number(rot.get("nutrition_rotating_soon")), 2),
         "medicine": int(first_number(critical.get("medicine_total"))),
         "weapons": int(first_number(critical.get("weapon_count"))),
     }
@@ -699,9 +702,11 @@ def make_questions(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
         if any(first_number(pawn.get("distance_to_nearest_opponent"), 9999) <= 2
                for pawn in fighters):
             criteria["engage_melee"] = (
-                "Enemy is in contact: use mobile colonists for immediate melee, including gun-bash if a shooter cannot fire. "
-                "This prevents standing still but risks wounds against a stronger melee attacker."
+                "Enemy is in contact: only fighters actually touching the enemy enter melee; other armed colonists keep firing. "
+                "Gun-bashing sacrifices ranged fire and can be lethal against a stronger melee attacker; compare a short backstep."
             )
+            if "backstep_fire" in criteria:
+                criteria = {"backstep_fire": criteria.pop("backstep_fire"), **criteria}
         if not staging and any(weapon.get("is_ranged") for weapon in snapshot["combat"].get("available_weapons", [])) and any(
             not pawn.get("has_ranged_weapon") and first_number(pawn.get("sight"), 1) >= 0.65
             and first_number(pawn.get("manipulation"), 1) >= 0.65
@@ -1501,6 +1506,33 @@ def plan_action(snapshot: dict[str, Any], decision: dict[str, Any]) -> dict[str,
                 first_number((h.get("position") or {}).get("z")) - az
             ) ** 2,
         )
+        if choice == "engage_melee":
+            contact = [pawn for pawn in ranked_fighters
+                       if first_number(pawn.get("distance_to_nearest_opponent"), 9999) <= 2]
+            support = [pawn for pawn in ranked_fighters
+                       if pawn not in contact and pawn.get("has_ranged_weapon")]
+            if not contact:
+                return {"kind": "noop", "description": "No fighter remains in melee contact"}
+            commands = reserve_commands + [
+                {"endpoint": "/api/v1/pawn/edit/status", "body": {"pawn_id": pawn["id"], "is_drafted": True}}
+                for pawn in contact
+            ] + [
+                {"endpoint": "/api/v1/pawn/job", "body": {
+                    "pawn_id": pawn["id"], "job_def": "AttackMelee", "target_thing_id": target["id"],
+                }} for pawn in contact
+            ]
+            if support:
+                commands.append({"endpoint": "/api/v1/combat/tactic", "body": {
+                    "map_id": snapshot["map"]["id"], "tactic": "focus_fire",
+                    "fighter_ids": [int(pawn["id"]) for pawn in support],
+                    "target_pawn_id": int(target["id"]),
+                }})
+            if resume_command:
+                commands.append(resume_command)
+            return {"kind": "commands", "description": (
+                f"Melee contact: {', '.join(str(p.get('name')) for p in contact)}; "
+                f"covering shooters: {', '.join(str(p.get('name')) for p in support) or 'none'}"
+            ), "commands": commands}
         if choice == "preemptive_strike":
             if all(
                 pawn.get("is_drafted") and pawn.get("current_job") == "AttackStatic"

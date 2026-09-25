@@ -51,6 +51,16 @@ class RosterAgent:
 
 
 class BridgeTests(unittest.TestCase):
+    def test_food_summary_preserves_short_term_spoilage(self):
+        summary = {"critical_resources": {"food_summary": {
+            "food_total": 90, "meals_count": 5, "raw_food_count": 85,
+            "rot_status_info": {"nutrition_rotating_soon": 12.345},
+        }}}
+        normalized = bridge.normalize_resource_summary(summary)
+        self.assertEqual(normalized["meals"], 5)
+        self.assertEqual(normalized["raw_food"], 85)
+        self.assertEqual(normalized["nutrition_rotting_soon"], 12.35)
+
     def test_download_model_command_prefetches_without_loading_weights_or_game(self):
         with mock.patch.object(sys, "argv", ["rimworld_laya.py", "download-model"]):
             with mock.patch.object(bridge, "resolve_model_source", return_value="cached") as prefetch:
@@ -192,6 +202,35 @@ class BridgeTests(unittest.TestCase):
                          "advance_to_range", "hold_cover"}.issubset(criteria))
         action = bridge.plan_action(snapshot, {"choice": "prepare_undrafted"})
         self.assertEqual(action["commands"][0]["body"], {"pawn_id": 10, "is_drafted": False})
+
+    def test_melee_contact_keeps_distant_shooter_firing(self):
+        snapshot = self.snapshot()
+        snapshot["map"]["enemies"] = 1
+        snapshot["combat"] = {
+            "available": True,
+            "colonists": [
+                {"id": 10, "name": "Ivy", "health": 0.8, "melee_skill": 3,
+                 "has_ranged_weapon": True, "weapon_def": "Revolver",
+                 "distance_to_nearest_opponent": 1,
+                 "position": {"x": 10, "z": 10}},
+                {"id": 11, "name": "Bo", "health": 1, "melee_skill": 2,
+                 "has_ranged_weapon": True, "weapon_def": "BoltActionRifle",
+                 "distance_to_nearest_opponent": 12,
+                 "position": {"x": 22, "z": 10}},
+            ],
+            "hostiles": [{"id": 99, "name": "Raider", "health": 1,
+                          "position": {"x": 11, "z": 10}}],
+        }
+        action = bridge.plan_action(snapshot, {"choice": "engage_melee"})
+        self.assertEqual(action["kind"], "commands")
+        self.assertTrue(any(command["endpoint"] == "/api/v1/pawn/job"
+                            and command["body"].get("pawn_id") == 10
+                            and command["body"].get("job_def") == "AttackMelee"
+                            for command in action["commands"]))
+        self.assertTrue(any(command["endpoint"] == "/api/v1/combat/tactic"
+                            and command["body"].get("fighter_ids") == [11]
+                            and command["body"].get("tactic") == "focus_fire"
+                            for command in action["commands"]))
 
     def test_preemptive_strike_does_not_reset_same_attack_order(self):
         snapshot = self.snapshot()

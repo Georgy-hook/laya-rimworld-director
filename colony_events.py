@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -33,6 +34,7 @@ RESPONSE_OPTIONS: dict[str, dict[str, str]] = {
         "defer_rescue": "Do not launch an expedition that cannot reach the site or survive the estimated threat.",
     },
     "fire": {
+        "protect_home_from_fire": "Expand Home area around a live fire threatening colony buildings and assign a healthy firefighter; a remote fire may be left alone.",
         "prioritize_firefighting": "Set Firefighter priority 1 for healthy colonists and resume time.",
         "observe_event": "Observe only when the fire is remote, rain-controlled or already extinguished.",
     },
@@ -108,6 +110,22 @@ def event_signature(row: dict[str, Any]) -> str:
     return f"{source}:{identity}:{stamp}"
 
 
+def matching_rescue_quests(event: dict[str, Any], context: dict[str, Any]) -> list[dict[str, Any]]:
+    """Never mistake a stranger's rescue quest for a kidnapped colonist's."""
+    quests = [row for row in context.get("active_quests") or [] if isinstance(row, dict)
+              and classify_event(row) == "kidnap_rescue"]
+    if event.get("source") == "quest" and event.get("id") is not None:
+        return [row for row in quests if str(row.get("id")) == str(event["id"])]
+    if event.get("source") != "kidnapped":
+        return quests
+    name = str(event.get("name") or "").strip()
+    if not name:
+        return []
+    pattern = re.compile(r"(?<!\w)" + re.escape(name) + r"(?!\w)", re.IGNORECASE)
+    return [row for row in quests if pattern.search(" ".join(str(row.get(key) or "")
+                for key in ("name", "description", "reward")))]
+
+
 def pending_events(context: dict[str, Any], handled: set[str]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for key, source in (("recent_incidents", "incident"), ("active_conditions", "condition"), ("active_quests", "quest")):
@@ -133,6 +151,8 @@ def pending_events(context: dict[str, Any], handled: set[str]) -> list[dict[str,
         if not isinstance(raw, dict):
             continue
         row = {"source": "kidnapped", "family": "kidnap_rescue", "urgency": 98, **raw}
+        if not matching_rescue_quests(row, context):
+            continue
         row["signature"] = event_signature({**row, "name": raw.get("id")})
         if row["signature"] not in handled:
             rows.append(row)
@@ -144,11 +164,16 @@ def response_options(event: dict[str, Any], context: dict[str, Any]) -> dict[str
     options = dict(RESPONSE_OPTIONS.get(family, RESPONSE_OPTIONS["unknown"]))
     if family == "trade" and not context.get("trade_opportunities"):
         options.pop("trade_now", None)
+    if family == "fire" and not any(
+        not row.get("in_home") and int(row.get("nearby_player_buildings") or 0) > 0
+        for row in (context.get("fire_situation") or {}).get("fires") or []
+    ):
+        options.pop("protect_home_from_fire", None)
     if family == "kidnap_rescue":
-        quests = [row for row in (context.get("active_quests") or []) if classify_event(row) == "kidnap_rescue"]
+        quests = matching_rescue_quests(event, context)
         accepted = any(bool(row.get("ever_accepted")) for row in quests)
         has_site = any(row.get("look_targets") for row in quests)
-        if not quests:
+        if not quests or accepted:
             options.pop("accept_rescue_quest", None)
         if not accepted:
             options.pop("prepare_rescue_mission", None)
@@ -165,6 +190,7 @@ def event_context_for_model(event: dict[str, Any], context: dict[str, Any], snap
         "quests": context.get("active_quests") or [],
         "kidnapped_pawns": context.get("kidnapped_pawns") or [],
         "trade_opportunities": context.get("trade_opportunities") or [],
+        "fire_situation": context.get("fire_situation") or {},
         "colony": {
             "population": len(snapshot.get("colonists", [])),
             "resources": snapshot.get("map", {}).get("resources", {}),

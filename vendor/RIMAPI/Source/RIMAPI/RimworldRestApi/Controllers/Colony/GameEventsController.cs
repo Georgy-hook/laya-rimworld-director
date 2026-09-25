@@ -89,5 +89,13 @@ namespace RIMAPI.Controllers
             var body = await context.Request.ReadBodyAsync<QuestActionRequestDto>();
             await context.SendJsonResponse(GameEventAutomationHelper.AcceptQuest(body));
         }
+
+        [Post("/api/v1/events/letter/choose")]
+        [EndpointMetadata("Choose one enabled option from a live quest or joiner letter")]
+        public async Task ChooseLetterOption(HttpListenerContext context)
+        {
+            var body = await context.Request.ReadBodyAsync<LetterChoiceRequestDto>();
+            await context.SendJsonResponse(GameEventAutomationHelper.ChooseLetterOption(body));
+        }
     }
 }

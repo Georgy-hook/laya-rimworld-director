@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using HarmonyLib;
 using RIMAPI.Core;
 using RIMAPI.Models;
 using RimWorld;
@@ -75,6 +76,9 @@ namespace RIMAPI.Helpers
                         Text = letter is ChoiceLetter choice ? choice.Text : null,
                         LetterDef = letter.def?.defName,
                         ArrivalTick = letter.arrivalTick,
+                        EnabledOptions = letter is ChoiceLetter choiceLetter
+                            ? ReadLetterOptions(choiceLetter)
+                            : new List<string>(),
                     }).ToList(),
                     KidnappedPawns = Find.WorldPawns.AllPawnsAlive
                         .Where(p => p != null && p.RaceProps?.Humanlike == true && KidnapUtility.IsKidnapped(p))
@@ -95,6 +99,44 @@ namespace RIMAPI.Helpers
             catch (Exception ex)
             {
                 return ApiResult<EventContextDto>.Fail(ex.Message);
+            }
+        }
+
+        private static List<string> ReadLetterOptions(ChoiceLetter letter)
+        {
+            try
+            {
+                var options = Traverse.Create(letter).Property("Choices").GetValue<IEnumerable<DiaOption>>();
+                return options?.Where(option => option != null && !option.disabled)
+                    .Select(option => Traverse.Create(option).Field("text").GetValue<string>())
+                    .Where(label => !string.IsNullOrWhiteSpace(label)).ToList() ?? new List<string>();
+            }
+            catch
+            {
+                return new List<string>();
+            }
+        }
+
+        public static ApiResult ChooseLetterOption(LetterChoiceRequestDto request)
+        {
+            try
+            {
+                if (request == null || string.IsNullOrWhiteSpace(request.OptionLabel))
+                    return ApiResult.Fail("Letter ID and option label are required.");
+                var letter = Find.LetterStack.LettersListForReading.OfType<ChoiceLetter>()
+                    .SingleOrDefault(row => row.ID == request.LetterId);
+                if (letter == null) return ApiResult.Fail("Choice letter is no longer present.");
+                var options = Traverse.Create(letter).Property("Choices").GetValue<IEnumerable<DiaOption>>()
+                    ?.Where(option => option != null && !option.disabled
+                        && Traverse.Create(option).Field("text").GetValue<string>() == request.OptionLabel).ToList();
+                if (options == null || options.Count != 1)
+                    return ApiResult.Fail("Requested enabled letter choice is no longer unique.");
+                Traverse.Create(options[0]).Method("Activate").GetValue();
+                return ApiResult.Ok();
+            }
+            catch (Exception ex)
+            {
+                return ApiResult.Fail(ex.Message);
             }
         }
 

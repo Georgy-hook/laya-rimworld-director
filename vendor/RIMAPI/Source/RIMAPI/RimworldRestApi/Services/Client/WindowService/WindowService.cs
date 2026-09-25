@@ -1,14 +1,49 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using RIMAPI.Core;
 using RIMAPI.Models;
+using HarmonyLib;
+using RimWorld;
 using Verse;
 
 namespace RIMAPI.Services
 {
     public class WindowService : IWindowService
     {
+        private class NameCandidate
+        {
+            public string Label;
+            public string First;
+            public string Second;
+        }
+
+        private readonly ConditionalWeakTable<Window, List<NameCandidate>> _nameCandidates =
+            new ConditionalWeakTable<Window, List<NameCandidate>>();
+
+        private static List<NameCandidate> BuildNameCandidates(Window window)
+        {
+            var view = Traverse.Create(window);
+            var first = view.Field("curName").GetValue<string>();
+            var second = view.Field("curSecondName").GetValue<string>();
+            var dual = view.Field("useSecondName").GetValue<bool>();
+            var generateFirst = view.Field("nameGenerator").GetValue<Func<string>>();
+            var generateSecond = view.Field("secondNameGenerator").GetValue<Func<string>>();
+            var result = new List<NameCandidate>();
+            for (var index = 0; index < 4; index++)
+            {
+                var currentFirst = index == 0 ? first : generateFirst?.Invoke();
+                var currentSecond = dual ? (index == 0 ? second : generateSecond?.Invoke()) : null;
+                if (string.IsNullOrWhiteSpace(currentFirst) || (dual && string.IsNullOrWhiteSpace(currentSecond)))
+                    continue;
+                var label = dual ? currentFirst + " — " + currentSecond : currentFirst;
+                if (result.Any(item => item.Label == label)) continue;
+                result.Add(new NameCandidate { Label = label, First = currentFirst, Second = currentSecond });
+            }
+            return result;
+        }
+
         public ApiResult<List<OpenWindowDto>> ListWindows()
         {
             try
@@ -19,11 +54,25 @@ namespace RIMAPI.Services
                 {
                     foreach (var w in windows)
                     {
-                        list.Add(new OpenWindowDto
+                        var row = new OpenWindowDto
                         {
                             WindowType = w.GetType().Name,
                             ForcePause = w.forcePause,
-                        });
+                        };
+                        if (w is Dialog_NodeTree dialog)
+                        {
+                            var node = Traverse.Create(dialog).Field("curNode").GetValue<DiaNode>();
+                            row.DialogText = node?.text;
+                            row.EnabledOptions = node?.options
+                                .Where(option => !option.disabled)
+                                .Select(option => Traverse.Create(option).Field("text").GetValue<string>())
+                                .Where(label => !string.IsNullOrWhiteSpace(label)).ToList()
+                                ?? new List<string>();
+                        }
+                        if (w is Dialog_GiveName && w.GetType().Name.StartsWith("Dialog_NamePlayer"))
+                            row.SuggestedNames = _nameCandidates.GetValue(w, BuildNameCandidates)
+                                .Select(item => item.Label).ToList();
+                        list.Add(row);
                     }
                 }
                 return ApiResult<List<OpenWindowDto>>.Ok(list);
@@ -31,6 +80,68 @@ namespace RIMAPI.Services
             catch (Exception ex)
             {
                 return ApiResult<List<OpenWindowDto>>.Fail(ex.Message);
+            }
+        }
+
+        public ApiResult ChooseWindowOption(WindowChooseRequestDto request)
+        {
+            try
+            {
+                if (request == null || string.IsNullOrWhiteSpace(request.WindowType)
+                    || string.IsNullOrWhiteSpace(request.OptionLabel))
+                    return ApiResult.Fail("Window type and option label are required.");
+                var windows = Find.WindowStack?.Windows?.OfType<Dialog_NodeTree>()
+                    .Where(w => w.GetType().Name == request.WindowType).ToList();
+                if (windows == null || windows.Count != 1)
+                    return ApiResult.Fail("The requested dialogue is no longer uniquely open.");
+                var node = Traverse.Create(windows[0]).Field("curNode").GetValue<DiaNode>();
+                var choices = node?.options.Where(option => !option.disabled
+                    && Traverse.Create(option).Field("text").GetValue<string>() == request.OptionLabel).ToList();
+                if (choices == null || choices.Count != 1)
+                    return ApiResult.Fail("The requested enabled option is no longer unique.");
+                Traverse.Create(choices[0]).Method("Activate").GetValue();
+                return ApiResult.Ok();
+            }
+            catch (Exception ex)
+            {
+                return ApiResult.Fail(ex.Message);
+            }
+        }
+
+        public ApiResult ChooseSuggestedName(WindowNameRequestDto request)
+        {
+            try
+            {
+                if (request == null || string.IsNullOrWhiteSpace(request.WindowType)
+                    || string.IsNullOrWhiteSpace(request.SuggestedName))
+                    return ApiResult.Fail("Window type and suggested name are required.");
+                var windows = Find.WindowStack?.Windows?
+                    .Where(w => w is Dialog_GiveName && w.GetType().Name == request.WindowType).ToList();
+                if (windows == null || windows.Count != 1)
+                    return ApiResult.Fail("The requested naming dialogue is no longer uniquely open.");
+                var window = windows[0];
+                var candidates = _nameCandidates.GetValue(window, BuildNameCandidates)
+                    .Where(item => item.Label == request.SuggestedName).ToList();
+                if (candidates.Count != 1)
+                    return ApiResult.Fail("The requested name is not one of this dialogue's suggestions.");
+                var candidate = candidates[0];
+                var firstValid = AccessTools.Method(window.GetType(), "IsValidName", new[] { typeof(string) });
+                var secondValid = AccessTools.Method(window.GetType(), "IsValidSecondName", new[] { typeof(string) });
+                var named = AccessTools.Method(window.GetType(), "Named", new[] { typeof(string) });
+                var namedSecond = AccessTools.Method(window.GetType(), "NamedSecond", new[] { typeof(string) });
+                if (firstValid == null || named == null || !((bool)firstValid.Invoke(window, new object[] { candidate.First })))
+                    return ApiResult.Fail("The selected faction or settlement name is invalid.");
+                if (candidate.Second != null && (secondValid == null || namedSecond == null
+                    || !((bool)secondValid.Invoke(window, new object[] { candidate.Second }))))
+                    return ApiResult.Fail("The selected second name is invalid.");
+                named.Invoke(window, new object[] { candidate.First });
+                if (candidate.Second != null) namedSecond.Invoke(window, new object[] { candidate.Second });
+                Find.WindowStack.TryRemove(window, true);
+                return ApiResult.Ok();
+            }
+            catch (Exception ex)
+            {
+                return ApiResult.Fail(ex.Message);
             }
         }
 

@@ -59,5 +59,21 @@ namespace RIMAPI.BaseControllers
             var result = _windowService.CloseWindows(body);
             await context.SendJsonResponse(result);
         }
+
+        [Post("/api/v1/ui/window/choose")]
+        [EndpointMetadata("Choose one enabled option in the currently open RimWorld dialogue")]
+        public async Task ChooseWindowOption(HttpListenerContext context)
+        {
+            var body = await context.Request.ReadBodyAsync<WindowChooseRequestDto>();
+            await context.SendJsonResponse(_windowService.ChooseWindowOption(body));
+        }
+
+        [Post("/api/v1/ui/window/name")]
+        [EndpointMetadata("Choose one suggested name in a paused colony or faction naming dialogue")]
+        public async Task ChooseSuggestedName(HttpListenerContext context)
+        {
+            var body = await context.Request.ReadBodyAsync<WindowNameRequestDto>();
+            await context.SendJsonResponse(_windowService.ChooseSuggestedName(body));
+        }
     }
 }

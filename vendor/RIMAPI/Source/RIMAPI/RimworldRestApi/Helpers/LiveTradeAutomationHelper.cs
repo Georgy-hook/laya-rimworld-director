@@ -183,6 +183,13 @@ namespace RIMAPI.Helpers
                     Label = t.LabelCap,
                     Count = t.stackCount,
                     MarketValue = t.MarketValue,
+                    Humanlike = t is Pawn human && human.RaceProps.Humanlike,
+                    Animal = t is Pawn animal && animal.RaceProps.Animal,
+                    Health = t is Pawn patient ? patient.health?.summaryHealth?.SummaryHealthPercent ?? 0f : 1f,
+                    Skills = t is Pawn recruit && recruit.RaceProps.Humanlike && recruit.skills != null
+                        ? recruit.skills.skills.OrderByDescending(skill => skill.Level)
+                            .Take(5).Select(skill => $"{skill.def.defName}:{skill.Level}:{skill.passion}").ToList()
+                        : new List<string>(),
                     Categories = t.def.thingCategories?.Select(c => c.defName).ToList() ?? new List<string>(),
                 }).ToList(),
             };
@@ -218,7 +225,19 @@ namespace RIMAPI.Helpers
             if (categories.Count == 0 || row.ThingDef == null || row.IsCurrency) return 0;
             string text = (row.ThingDef.defName + " " + row.Label + " "
                 + string.Join(" ", row.ThingDef.thingCategories?.Select(c => c.defName) ?? Enumerable.Empty<string>())).ToLowerInvariant();
-            if (!categories.Any(c => text.Contains(c))) return 0;
+            bool selected = categories.Any(category =>
+                (category == "drugs" && new[] { "flake", "yayo", "smokeleafjoint", "beer", "ambrosia" }
+                    .Any(text.Contains))
+                || (category == "animals" && row.ThingDef.race?.Animal == true)
+                || (category == "food" && (text.Contains("food") || text.Contains("meal")
+                    || text.Contains("rice") || text.Contains("corn") || text.Contains("potato")))
+                || (category == "art" && text.Contains("sculpture"))
+                || (category == "apparel" && row.ThingDef.IsApparel)
+                || (category == "weapons" && row.ThingDef.IsWeapon)
+                || (category == "leather" && (text.Contains("leather") || text.Contains("wool")
+                    || text.Contains("cloth")))
+                || (category == "gold" && (text.Contains("gold") || text.Contains("jade"))));
+            if (!selected) return 0;
             int total = row.CountHeldBy(Transactor.Colony);
             int reserve = 0;
             if (text.Contains("food") || text.Contains("meal") || text.Contains("meat")) reserve = Math.Max(20, map.mapPawns.FreeColonistsSpawnedCount * 18);
@@ -226,6 +245,8 @@ namespace RIMAPI.Helpers
             else if (text.Contains("component")) reserve = text.Contains("advanced") ? 4 : 12;
             else if (text.Contains("steel")) reserve = 350;
             else if (text.Contains("wood")) reserve = 250;
+            else if (row.ThingDef.IsWeapon) reserve = 1;
+            else if (row.ThingDef.race?.Animal == true) reserve = 2;
             return Math.Max(0, total - reserve);
         }
 
@@ -237,6 +258,8 @@ namespace RIMAPI.Helpers
             if (wanted == "advancedcomponents") return text.Contains("componentadvanced");
             if (wanted == "components") return text.Contains("component") && !text.Contains("advanced");
             if (wanted == "medicine") return text.Contains("medicine") || text.Contains("neutroamine");
+            if (wanted == "slaves") return row.ThingDef.race?.Humanlike == true;
+            if (wanted == "livestock") return row.ThingDef.race?.Animal == true;
             if (wanted == "food") return text.Contains("food") || text.Contains("meal");
             if (wanted == "weapons") return row.ThingDef.IsWeapon;
             if (wanted == "armor") return text.Contains("armor") || text.Contains("helmet") || text.Contains("vest");
@@ -248,6 +271,7 @@ namespace RIMAPI.Helpers
             string value = (priority ?? "").ToLowerInvariant();
             if (value.Contains("medicine") || value.Contains("component")) return 20;
             if (value.Contains("food")) return 50;
+            if (value.Contains("slaves") || value.Contains("livestock")) return 1;
             if (row.ThingDef?.IsWeapon == true || value.Contains("armor")) return 2;
             return 10;
         }

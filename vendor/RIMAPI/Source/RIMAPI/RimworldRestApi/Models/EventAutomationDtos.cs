@@ -39,6 +39,13 @@ namespace RIMAPI.Models
         public string Text { get; set; }
         public string LetterDef { get; set; }
         public int ArrivalTick { get; set; }
+        public List<string> EnabledOptions { get; set; } = new List<string>();
+    }
+
+    public class LetterChoiceRequestDto
+    {
+        public int LetterId { get; set; }
+        public string OptionLabel { get; set; }
     }
 
     public class KidnappedPawnDto

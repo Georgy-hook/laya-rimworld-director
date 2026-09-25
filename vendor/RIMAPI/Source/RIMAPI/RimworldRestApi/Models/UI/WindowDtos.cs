@@ -51,5 +51,20 @@ namespace RIMAPI.Models
     {
         public string WindowType { get; set; }
         public bool ForcePause { get; set; }
+        public string DialogText { get; set; }
+        public List<string> EnabledOptions { get; set; } = new List<string>();
+        public List<string> SuggestedNames { get; set; } = new List<string>();
+    }
+
+    public class WindowChooseRequestDto
+    {
+        public string WindowType { get; set; }
+        public string OptionLabel { get; set; }
+    }
+
+    public class WindowNameRequestDto
+    {
+        public string WindowType { get; set; }
+        public string SuggestedName { get; set; }
     }
 }

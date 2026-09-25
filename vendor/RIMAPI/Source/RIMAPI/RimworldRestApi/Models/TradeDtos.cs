@@ -52,6 +52,10 @@ namespace RIMAPI.Models
         public string Label { get; set; }
         public int Count { get; set; }
         public float MarketValue { get; set; }
+        public bool Humanlike { get; set; }
+        public bool Animal { get; set; }
+        public float Health { get; set; }
+        public System.Collections.Generic.List<string> Skills { get; set; } = new System.Collections.Generic.List<string>();
         public System.Collections.Generic.List<string> Categories { get; set; } = new System.Collections.Generic.List<string>();
     }
 
